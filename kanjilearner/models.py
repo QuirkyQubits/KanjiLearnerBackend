@@ -1,3 +1,4 @@
+from typing import Type
 from django.db import models
 
 # Create your models here.
@@ -8,6 +9,9 @@ from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from datetime import timedelta
 from django.utils import timezone
+from django.contrib.auth.models import User
+from django.db.models import QuerySet
+from typing import Type
 
 
 User = get_user_model()
@@ -148,6 +152,10 @@ class UserDictionaryEntry(models.Model):
         blank=True,
         default=list
     )
+
+    @classmethod
+    def get_pending_reviews(cls: Type["UserDictionaryEntry"], user: "User") -> QuerySet["UserDictionaryEntry"]:
+        return cls.objects.filter(user=user, unlocked=True, next_review_at__lte=timezone.now())
 
     def unlock(self):
         if not self.unlocked:
