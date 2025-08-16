@@ -28,6 +28,19 @@ class DictionaryEntry(models.Model):
     kunyomi_readings = ArrayField(models.CharField(max_length=50), blank=True, default=list)
     onyomi_readings = ArrayField(models.CharField(max_length=50), blank=True, default=list)
 
+    # Only applies to vocab entries
+    readings = ArrayField(
+        models.CharField(max_length=50),
+        blank=True,
+        default=list,
+        help_text="Kana readings for vocab (e.g. たべる, みず)"
+    )
+
+    explanation = models.TextField(
+        blank=True,
+        help_text="Explain the definition in context and reading distinctions if multiple readings exist."
+    )
+
     level = models.PositiveIntegerField()
 
     # Dependencies and usage
@@ -51,11 +64,13 @@ class DictionaryEntry(models.Model):
 
     PARTS_OF_SPEECH_CHOICES = [
         ("noun", "Noun"),
-        ("transitive_verb", "Transitive Verb"),
-        ("intransitive_verb", "Intransitive Verb"),
+        ("suru_noun", "する-Noun"),
         ("i_adj", "い-Adjective"),
         ("na_adj", "な-Adjective"),
-        ("suru_noun", "する-Noun"),
+        ("godan_verb", "Godan Verb (五段動詞)"),
+        ("ichidan_verb", "Ichidan Verb (一段動詞)"),
+        ("transitive_verb", "Transitive Verb"),
+        ("intransitive_verb", "Intransitive Verb"),
         ("adverb", "Adverb"),
         ("expression", "Expression"),
         ("conjunction", "Conjunction"),
