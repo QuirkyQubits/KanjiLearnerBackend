@@ -104,7 +104,11 @@ class DictionaryEntry(models.Model):
 class UserDictionaryEntry(models.Model):
     user = models.ForeignKey("auth.User", on_delete=models.CASCADE)
     entry = models.ForeignKey("DictionaryEntry", on_delete=models.CASCADE)
-    unlocked = models.BooleanField(default=False)
+    
+    @property
+    def is_unlocked(self) -> bool:
+        return self.srs_stage != SRSStage.LOCKED
+
     unlocked_at = models.DateTimeField(null=True, blank=True)
 
     # L, Apprentice 1/2/3/4, Guru 1/2, Master, Enlightened, Burned
@@ -131,11 +135,24 @@ class UserDictionaryEntry(models.Model):
 
     @classmethod
     def get_pending_reviews(cls: Type["UserDictionaryEntry"], user: "User") -> QuerySet["UserDictionaryEntry"]:
-        return cls.objects.filter(user=user, unlocked=True, next_review_at__lte=timezone.now())
+        return cls.objects.filter(
+            user=user,
+            srs_stage__in=[
+                SRSStage.LESSON,
+                SRSStage.APPRENTICE_1,
+                SRSStage.APPRENTICE_2,
+                SRSStage.APPRENTICE_3,
+                SRSStage.APPRENTICE_4,
+                SRSStage.GURU_1,
+                SRSStage.GURU_2,
+                SRSStage.MASTER,
+                SRSStage.ENLIGHTENED,
+            ],
+            next_review_at__lte=timezone.now()
+)
 
     def unlock(self):
-        if not self.unlocked:
-            self.unlocked = True
+        if not self.is_unlocked:
             self.unlocked_at = timezone.now()
             self.srs_stage = SRSStage.LESSON
             self.next_review_at = None  # Waits for lesson to be completed
@@ -166,7 +183,7 @@ class UserDictionaryEntry(models.Model):
 
         for dependent_entry in dependent_entries:
             # Skip if the user already unlocked this dependent
-            if UserDictionaryEntry.objects.filter(user=self.user, entry=dependent_entry, unlocked=True).exists():
+            if UserDictionaryEntry.objects.filter(user=self.user, entry=dependent_entry).exclude(srs_stage=SRSStage.LOCKED).exists():
                 continue
 
             all_ready = True
@@ -174,7 +191,7 @@ class UserDictionaryEntry(models.Model):
             for constituent in dependent_entry.constituents.all():
                 try:
                     constituent_user_entry = UserDictionaryEntry.objects.get(user=self.user, entry=constituent)
-                    if not constituent_user_entry.unlocked or constituent_user_entry.srs_stage not in GURU_STAGES:
+                    if not constituent_user_entry.is_unlocked or constituent_user_entry.srs_stage not in GURU_STAGES:
                         all_ready = False
                         break
                 except UserDictionaryEntry.DoesNotExist:
@@ -190,7 +207,7 @@ class UserDictionaryEntry(models.Model):
                         f"UserDictionaryEntry missing for user={self.user.username} entry={dependent_entry.literal} (id={dependent_entry.id})"
                     )
 
-                if not user_entry.unlocked:
+                if not user_entry.is_unlocked:
                     user_entry.unlocked = True
                     user_entry.unlocked_at = timezone.now()
                     user_entry.srs_stage = SRSStage.LESSON

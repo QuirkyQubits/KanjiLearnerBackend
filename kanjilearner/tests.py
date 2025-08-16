@@ -35,7 +35,6 @@ class UserDictionaryEntryTests(TestCase):
         UserDictionaryEntry.objects.create(
             user=self.user,
             entry=self.radical,
-            unlocked=True,
             unlocked_at=timezone.now() - timedelta(days=3),
             srs_stage=SRSStage.GURU_2,
             last_reviewed_at=timezone.now(),
@@ -47,7 +46,6 @@ class UserDictionaryEntryTests(TestCase):
         UserDictionaryEntry.objects.create(
             user=self.user,
             entry=self.kanji,
-            unlocked=True,
             unlocked_at=timezone.now() - timedelta(days=2),
             srs_stage=SRSStage.APPRENTICE_1,
             last_reviewed_at=timezone.now() - timedelta(hours=5),
@@ -59,7 +57,6 @@ class UserDictionaryEntryTests(TestCase):
         UserDictionaryEntry.objects.create(
             user=self.user,
             entry=self.vocab,
-            unlocked=False,
             review_history=[],
         )
 
@@ -69,12 +66,12 @@ class UserDictionaryEntryTests(TestCase):
         self.assertEqual(pending.first().entry.literal, "人")
 
     def test_locked_items_still_locked(self):
-        locked = UserDictionaryEntry.objects.filter(user=self.user, unlocked=False)
+        locked = UserDictionaryEntry.objects.filter(user=self.user, srs_stage=SRSStage.LOCKED)
         self.assertEqual(locked.count(), 1)
         self.assertEqual(locked.first().entry.literal, "人々")
 
     def test_unlocked_items_count(self):
-        unlocked = UserDictionaryEntry.objects.filter(user=self.user, unlocked=True)
+        unlocked = UserDictionaryEntry.objects.filter(user=self.user).exclude(srs_stage=SRSStage.LOCKED)
         self.assertEqual(unlocked.count(), 2)
 
 
@@ -100,7 +97,6 @@ class AutoUnlockTests(TestCase):
         self.radical_user_entry = UserDictionaryEntry.objects.create(
             user=self.user,
             entry=self.radical,
-            unlocked=True,
             unlocked_at=timezone.now() - timedelta(days=5),
             srs_stage=SRSStage.APPRENTICE_4,
             last_reviewed_at=timezone.now() - timedelta(days=1),
@@ -112,7 +108,6 @@ class AutoUnlockTests(TestCase):
         self.kanji_user_entry = UserDictionaryEntry.objects.create(
             user=self.user,
             entry=self.kanji,
-            unlocked=False,
             review_history=[],
         )
 
@@ -120,21 +115,20 @@ class AutoUnlockTests(TestCase):
         self.vocab_user_entry = UserDictionaryEntry.objects.create(
             user=self.user,
             entry=self.vocab,
-            unlocked=False,
             review_history=[],
         )
 
     def test_promoting_radical_unlocks_kanji(self):
         # Confirm kanji is initially locked
         kanji_entry = UserDictionaryEntry.objects.get(user=self.user, entry=self.kanji)
-        self.assertFalse(kanji_entry.unlocked)
+        self.assertFalse(kanji_entry.is_unlocked)
 
         # Promote radical from A4 → G1
         self.radical_user_entry.promote()
 
         # Confirm the kanji is unlocked
         kanji_entry.refresh_from_db()
-        self.assertTrue(kanji_entry.unlocked)
+        self.assertTrue(kanji_entry.is_unlocked)
         self.assertEqual(kanji_entry.srs_stage, SRSStage.LESSON)
         self.assertIsNone(kanji_entry.next_review_at)
 
@@ -144,7 +138,6 @@ class AutoUnlockTests(TestCase):
 
         # Manually set kanji to A4 and ready to promote
         kanji_entry = UserDictionaryEntry.objects.get(user=self.user, entry=self.kanji)
-        kanji_entry.unlocked = True
         kanji_entry.unlocked_at = timezone.now() - timedelta(days=1)
         kanji_entry.srs_stage = SRSStage.APPRENTICE_4
         kanji_entry.last_reviewed_at = timezone.now() - timedelta(hours=8)
@@ -153,14 +146,14 @@ class AutoUnlockTests(TestCase):
 
         # Confirm vocab is initially locked
         vocab_entry = UserDictionaryEntry.objects.get(user=self.user, entry=self.vocab)
-        self.assertFalse(vocab_entry.unlocked)
+        self.assertFalse(vocab_entry.is_unlocked)
 
         # Promote kanji to G1
         kanji_entry.promote()
 
         # Confirm vocab gets unlocked
         vocab_entry.refresh_from_db()
-        self.assertTrue(vocab_entry.unlocked)
+        self.assertTrue(vocab_entry.is_unlocked)
         self.assertEqual(vocab_entry.srs_stage, SRSStage.LESSON)
         self.assertIsNone(vocab_entry.next_review_at)
 
@@ -177,8 +170,12 @@ class InitializeUserDictionaryEntriesTest(TestCase):
             literal="⼆", meaning="Two", type="RADICAL", level=2, priority=1
         )
         DictionaryEntry.objects.create(
-            literal="水", meaning="Water", type="KANJI", level=1, priority=2
+            literal="三", meaning="Three", type="KANJI", level=1, priority=2
         )
+
+        radical = DictionaryEntry.objects.get(literal="⼀")
+        kanji = DictionaryEntry.objects.get(literal="三")
+        kanji.constituents.add(radical)
 
     def test_initialize_user_dictionary_entries(self):
         initialize_user_dictionary_entries(self.user)
@@ -204,10 +201,10 @@ class InitializeUserDictionaryEntriesTest(TestCase):
                         should_unlock = True
 
             if should_unlock:
-                self.assertTrue(user_entry.unlocked, f"Expected {entry} to be unlocked")
+                self.assertNotEqual(user_entry.srs_stage, SRSStage.LOCKED.value)
                 self.assertIsNotNone(user_entry.unlocked_at)
             else:
-                self.assertFalse(user_entry.unlocked, f"Expected {entry} to be locked")
+                self.assertEqual(user_entry.srs_stage, SRSStage.LOCKED.value)
                 self.assertIsNone(user_entry.unlocked_at)
 
         for ue in user_entries:

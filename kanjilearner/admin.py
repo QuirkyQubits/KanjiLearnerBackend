@@ -91,6 +91,6 @@ class DictionaryEntryAdmin(admin.ModelAdmin):
 
 @admin.register(UserDictionaryEntry)
 class UserDictionaryEntryAdmin(admin.ModelAdmin):
-    list_display = ("user", "entry", "srs_stage", "unlocked", "unlocked_at")
-    list_filter = ("srs_stage", "unlocked")
+    list_display = ("user", "entry", "srs_stage", "unlocked_at")
+    list_filter = ("srs_stage",)
     search_fields = ("entry__literal", "user__username")
