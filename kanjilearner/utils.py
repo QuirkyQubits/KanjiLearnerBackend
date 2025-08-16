@@ -9,6 +9,18 @@ def initialize_user_dictionary_entries(user):
     now = timezone.now()
 
     for entry in entries:
+        # 🔥 Rule 0: Burn everything in level 0
+        if entry.level == 0:
+            bulk_entries.append(UserDictionaryEntry(
+                user=user,
+                entry=entry,
+                srs_stage=SRSStage.BURNED.value,
+                unlocked_at=now,
+                next_review_at=None,
+                review_history=[],  # or optional history with 'BURNED' entry
+            ))
+            continue  # Skip other rules
+
         # Default
         srs_stage = SRSStage.LOCKED.value
         unlocked_at = None

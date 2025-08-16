@@ -4,6 +4,7 @@ from kanjilearner.utils import initialize_user_dictionary_entries
 from kanjilearner.models import UserDictionaryEntry
 from kanjilearner.constants import EntryType, SRSStage
 from kanjilearner.models import DictionaryEntry
+from django.contrib.auth.models import User
 
 
 User = get_user_model()
@@ -15,10 +16,7 @@ class Command(BaseCommand):
         # code goes here to run
         # run it like $ python manage.py run_init
 
-        # Fetch all level 0 entries
-        level_0_entries = DictionaryEntry.objects.filter(level=0)
-
-        # Update their entry_type to RADICAL
-        updated_count = level_0_entries.update(entry_type=EntryType.RADICAL)
+        user = User.objects.get(username="testuser")
+        initialize_user_dictionary_entries(user)
         
         self.stdout.write(self.style.SUCCESS("Initialization complete."))

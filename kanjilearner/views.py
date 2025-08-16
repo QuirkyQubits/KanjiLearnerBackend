@@ -1,13 +1,37 @@
 from collections import defaultdict
 from datetime import datetime, timedelta
+from datetime import timezone as dt_timezone
+from django.utils import timezone as dj_timezone
 from kanjilearner.constants import SRSStage
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
-from django.utils import timezone
 from kanjilearner.models import DictionaryEntry, RecentMistake, UserDictionaryEntry
 from kanjilearner.serializers import DictionaryEntrySerializer
 from zoneinfo import ZoneInfo
+from django.contrib.auth import authenticate, login
+from django.views.decorators.csrf import ensure_csrf_cookie
+
+
+@api_view(['GET'])
+@ensure_csrf_cookie
+def get_csrf_token(request):
+    return Response({"message": "CSRF cookie set"})
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def login_view(request):
+    username = request.data.get("username")
+    password = request.data.get("password")
+
+    user = authenticate(request, username=username, password=password)
+
+    if user is not None:
+        login(request, user)
+        return Response({"message": "Logged in"})
+    else:
+        return Response({"error": "Invalid credentials"}, status=400)
 
 
 @api_view(['GET'])
@@ -43,7 +67,7 @@ def get_reviews(request):
     Supports ?limit=... query param.
     """
     limit = int(request.query_params.get("limit", 100))
-    now = timezone.now()
+    now = datetime.now(dt_timezone.utc)
 
     user_entries = (
         UserDictionaryEntry.objects
@@ -68,7 +92,7 @@ def get_recent_mistakes(request):
     Return up to 50 recent mistakes from the past 24 hours for the user.
     These are pre-tracked in the RecentMistake table.
     """
-    now = timezone.now()
+    now = datetime.now(dt_timezone.utc)
     cutoff = now - timedelta(hours=24)
 
     recent_mistakes = (
@@ -158,7 +182,7 @@ def get_review_forecast(request):
     except Exception:
         return Response({"error": f"Unknown timezone: {user_tz_str}"}, status=400)
 
-    now_utc = timezone.now()
+    now_utc = dj_timezone.now()
     now_local = now_utc.astimezone(user_tz)
 
     # Build local end of day
@@ -172,8 +196,8 @@ def get_review_forecast(request):
         tzinfo=user_tz
     )
 
-    utc_start = now_local.astimezone(timezone.utc)
-    utc_end = local_day_end.astimezone(timezone.utc)
+    utc_start = now_local.astimezone(dt_timezone.utc)
+    utc_end = local_day_end.astimezone(dt_timezone.utc)
 
     # Get upcoming reviews between now and 11:59 PM local time
     upcoming_reviews = (
