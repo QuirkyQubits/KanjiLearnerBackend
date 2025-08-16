@@ -36,10 +36,22 @@ class DictionaryEntryForm(forms.ModelForm):
 class DictionaryEntryAdmin(admin.ModelAdmin):
     form = DictionaryEntryForm
     readonly_fields = ['id']
-    list_display = ("literal", "type", "meaning", "kunyomi_readings", "onyomi_readings", "reading_mnemonic", "meaning_mnemonic", "level", "parts_of_speech")
+    list_display = ("literal", "type", "meaning", "kunyomi_readings", "onyomi_readings", "level", "parts_of_speech", "priority")
     search_fields = ("literal", "meaning", "reading")
     list_filter = ("type", "level")
     filter_horizontal = ('constituents',)
+
+    fieldsets = (
+        (None, {
+            'fields': ('literal', 'meaning', "kunyomi_readings", "onyomi_readings", 'level', 'priority', 'type')
+        }),
+        ('Structure', {
+            'fields': ('constituents',)
+        }),
+        ('Mnemonics', {
+            'fields': ('meaning_mnemonic', 'reading_mnemonic')
+        }),
+    )
 
     def get_form(self, request, obj=None, **kwargs):
         form = super().get_form(request, obj, **kwargs)
