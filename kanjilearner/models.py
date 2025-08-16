@@ -171,10 +171,56 @@ class UserDictionaryEntry(models.Model):
             self.next_review_at = timezone.now() + self.SRS_INTERVALS["A1"]
             self.save()
 
+
+    def try_auto_unlock_dependents(self):
+        """
+        Called when an item reaches G1. Check dependent entries (KANJI or VOCAB),
+        and unlock them if all their constituents are unlocked and at G1+.
+        """
+        GURU_STAGES = {"G1", "G2", "M", "E", "B"}
+
+        # Get all DictionaryEntry objects that use this entry as a constituent
+        dependent_entries = self.entry.used_in.all()
+
+        for dependent_entry in dependent_entries:
+            # Skip if the user already unlocked this dependent
+            if UserDictionaryEntry.objects.filter(user=self.user, entry=dependent_entry, unlocked=True).exists():
+                continue
+
+            all_ready = True
+
+            for constituent in dependent_entry.constituents.all():
+                try:
+                    constituent_user_entry = UserDictionaryEntry.objects.get(user=self.user, entry=constituent)
+                    if not constituent_user_entry.unlocked or constituent_user_entry.srs_stage not in GURU_STAGES:
+                        all_ready = False
+                        break
+                except UserDictionaryEntry.DoesNotExist:
+                    all_ready = False
+                    break
+
+            if all_ready:
+                # Unlock the dependent entry
+                try:
+                    user_entry = UserDictionaryEntry.objects.get(user=self.user, entry=dependent_entry)
+                except UserDictionaryEntry.DoesNotExist:
+                    raise RuntimeError(
+                        f"UserDictionaryEntry missing for user={self.user.username} entry={dependent_entry.literal} (id={dependent_entry.id})"
+                    )
+
+                if not user_entry.unlocked:
+                    user_entry.unlocked = True
+                    user_entry.unlocked_at = timezone.now()
+                    user_entry.srs_stage = "L"
+                    user_entry.next_review_at = None
+                    user_entry.save()
+
+
+
     def promote(self):
         stage_order = ["L", "A1", "A2", "A3", "A4", "G1", "G2", "M", "E", "B"]
         try:
-            index = self.SRS_STAGES.index(self.srs_stage)
+            index = stage_order.index(self.srs_stage)
         except ValueError:
             raise ValueError(f"Invalid stage value: {self.srs_stage}")
         
@@ -185,6 +231,10 @@ class UserDictionaryEntry(models.Model):
                 timezone.now() + self.SRS_INTERVALS.get(self.srs_stage) if self.srs_stage != "B" else None
             )
             self.save()
+            
+            # 🔑 Trigger auto-unlock when hitting G1
+            if self.srs_stage == "G1":
+                self.try_auto_unlock_dependents()
 
     
     def demote(self):
