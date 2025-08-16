@@ -6,6 +6,8 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.contrib.postgres.fields import ArrayField
 from django.db import models
+from datetime import timedelta
+from django.utils import timezone
 
 
 User = get_user_model()
@@ -33,6 +35,16 @@ class DictionaryEntry(models.Model):
 
     # Optional audio clip (for vocab entries)
     audio = models.FileField(upload_to="audio/", blank=True, null=True)
+
+    # Mnemonics
+    reading_mnemonic = models.TextField(
+        blank=True,
+        help_text="Explanation to help remember the reading"
+    )
+    meaning_mnemonic = models.TextField(
+        blank=True,
+        help_text="Explanation to help remember the meaning"
+    )
 
     # priority for with a level, for front-end ordering and lessons priority
     priority = models.PositiveIntegerField(default=1, help_text="Ordering within a level")
@@ -71,6 +83,7 @@ class DictionaryEntry(models.Model):
 
 class UserDictionaryEntry(models.Model):
     SRS_STAGES = [
+        ("L", "Lesson"),
         ("A1", "Apprentice 1"),
         ("A2", "Apprentice 2"),
         ("A3", "Apprentice 3"),
@@ -82,47 +95,94 @@ class UserDictionaryEntry(models.Model):
         ("B", "Burned"),
     ]
 
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
-    entry = models.ForeignKey(DictionaryEntry, on_delete=models.CASCADE)
+    SRS_INTERVALS = {
+        "A1": timedelta(hours=4),
+        "A2": timedelta(hours=8),
+        "A3": timedelta(days=1),
+        "A4": timedelta(days=2),
+        "G1": timedelta(days=7),
+        "G2": timedelta(days=14),
+        "M": timedelta(days=30),
+        "E": timedelta(days=120),
+        # "B": no interval; it's final
+    }
 
-    # SRS progress
+    user = models.ForeignKey("auth.User", on_delete=models.CASCADE)
+    entry = models.ForeignKey("DictionaryEntry", on_delete=models.CASCADE)
     unlocked = models.BooleanField(default=False)
     unlocked_at = models.DateTimeField(null=True, blank=True)
-    srs_stage = models.CharField(max_length=2, choices=SRS_STAGES, default="A1")
 
-    # User custom content
-    user_synonyms = models.JSONField(default=list, blank=True)
-    user_sentences = models.JSONField(default=list, blank=True)
+    # L, Apprentice 1/2/3/4, Guru 1/2, Master, Enlightened, Burned
+    srs_stage = models.CharField(max_length=2, choices=SRS_STAGES, default="L")
+    next_review_at = models.DateTimeField(null=True, blank=True)
+    last_reviewed_at = models.DateTimeField(null=True, blank=True)
 
-    # Review log (timestamps + correctness); can be extracted later
+    # Review history — structured data (timestamps, results, etc.)
     review_history = models.JSONField(default=list, blank=True)
 
-    class Meta:
-        unique_together = ("user", "entry")
+    # User-provided synonyms — list of plain strings
+    user_synonyms = ArrayField(
+        models.CharField(max_length=100),
+        blank=True,
+        default=list
+    )
 
-    def clean(self):
-        # Count constraints
-        if len(self.user_synonyms) > 10:
-            raise ValidationError("You may not have more than 10 user synonyms.")
-        if len(self.user_sentences) > 2:
-            raise ValidationError("You may not have more than 2 user sentences.")
+    # User example sentences — list of plain strings
+    user_sentences = ArrayField(
+        models.CharField(max_length=300),
+        blank=True,
+        default=list
+    )
 
-        # Length constraints
-        for synonym in self.user_synonyms:
-            if not isinstance(synonym, str):
-                raise ValidationError("All synonyms must be strings.")
-            if len(synonym) > 50:
-                raise ValidationError("Each synonym must be 50 characters or fewer.")
+    def unlock(self):
+        if not self.unlocked:
+            self.unlocked = True
+            self.unlocked_at = timezone.now()
+            self.srs_stage = "L"
+            self.next_review_at = None  # Waits for lesson to be completed
+            self.save()
 
-        for sentence in self.user_sentences:
-            if not isinstance(sentence, str):
-                raise ValidationError("All user sentences must be strings.")
-            if len(sentence) > 1000:
-                raise ValidationError("Each sentence must be 1000 characters or fewer.")
+    def complete_lesson(self):
+        if self.srs_stage == "L":
+            self.srs_stage = "A1"
+            self.next_review_at = timezone.now() + self.SRS_INTERVALS["A1"]
+            self.save()
 
-    def save(self, *args, **kwargs):
-        self.full_clean()
-        super().save(*args, **kwargs)
+    def promote(self):
+        stage_order = ["L", "A1", "A2", "A3", "A4", "G1", "G2", "M", "E", "B"]
+        try:
+            index = self.SRS_STAGES.index(self.srs_stage)
+        except ValueError:
+            raise ValueError(f"Invalid stage value: {self.srs_stage}")
+        
+        if index < len(stage_order) - 1:
+            self.srs_stage = stage_order[index + 1]
+            self.last_reviewed_at = timezone.now()
+            self.next_review_at = (
+                timezone.now() + self.SRS_INTERVALS.get(self.srs_stage) if self.srs_stage != "B" else None
+            )
+            self.save()
 
-    def __str__(self):
-        return f"{self.user.username} - {self.entry.literal} ({self.entry.get_type_display()})"
+    
+    def demote(self):
+        """Demote item based on SRS rules when user gets it wrong."""
+        if self.srs_stage == "L" or self.srs_stage == "B":
+            return  # No demotion for Lessons or Burned
+
+        # Unified demotion map, including A1 → A1 fallback
+        demotion_map = {
+            "A1": "A1",
+            "A2": "A1",
+            "A3": "A1",
+            "A4": "A1",
+            "G1": "A4",
+            "G2": "A4",
+            "M":  "G1",
+            "E":  "G1"
+        }
+
+        new_stage = demotion_map.get(self.srs_stage, "A1")  # Safety fallback
+        self.srs_stage = new_stage
+        self.last_reviewed_at = timezone.now()
+        self.next_review_at = timezone.now() + self.SRS_INTERVALS[new_stage]
+        self.save()
