@@ -4,7 +4,7 @@ from django.utils import timezone
 from datetime import timedelta
 from kanjilearner.models import DictionaryEntry, UserDictionaryEntry
 from .utils import initialize_user_dictionary_entries  # adjust if in another module
-from kanjilearner.constants import SRSStage, SRS_INTERVALS
+from kanjilearner.constants import SRSStage, SRS_INTERVALS, EntryType
 
 # Use the correct user model (default or custom)
 User = get_user_model()
@@ -16,18 +16,18 @@ class UserDictionaryEntryTests(TestCase):
 
         # Radical
         self.radical = DictionaryEntry.objects.create(
-            literal="⼈", meaning="person", type="RADICAL", level=1, priority=1
+            literal="⼈", meaning="person", entry_type=EntryType.RADICAL, level=1, priority=1
         )
 
         # Kanji that depends on radical
         self.kanji = DictionaryEntry.objects.create(
-            literal="人", meaning="person", type="KANJI", level=1, priority=2
+            literal="人", meaning="person", entry_type=EntryType.KANJI, level=1, priority=2
         )
         self.kanji.constituents.add(self.radical)
 
         # Vocab that depends on kanji
         self.vocab = DictionaryEntry.objects.create(
-            literal="人々", meaning="people", type="VOCAB", level=1, priority=3
+            literal="人々", meaning="people", entry_type=EntryType.VOCAB, level=1, priority=3
         )
         self.vocab.constituents.add(self.kanji)
 
@@ -81,15 +81,15 @@ class AutoUnlockTests(TestCase):
 
         # Create radical, kanji, and vocab
         self.radical = DictionaryEntry.objects.create(
-            literal="⼈", type="RADICAL", level=1, priority=1
+            literal="⼈", entry_type=EntryType.RADICAL, level=1, priority=1
         )
         self.kanji = DictionaryEntry.objects.create(
-            literal="人", type="KANJI", level=1, priority=2
+            literal="人", entry_type=EntryType.KANJI, level=1, priority=2
         )
         self.kanji.constituents.add(self.radical)
 
         self.vocab = DictionaryEntry.objects.create(
-            literal="人々", type="VOCAB", level=1, priority=3
+            literal="人々", entry_type=EntryType.VOCAB, level=1, priority=3
         )
         self.vocab.constituents.add(self.kanji)
 
@@ -164,13 +164,13 @@ class InitializeUserDictionaryEntriesTest(TestCase):
 
         # Sample dictionary entries
         DictionaryEntry.objects.create(
-            literal="⼀", meaning="One", type="RADICAL", level=1, priority=1
+            literal="⼀", meaning="One", entry_type=EntryType.RADICAL, level=1, priority=1
         )
         DictionaryEntry.objects.create(
-            literal="⼆", meaning="Two", type="RADICAL", level=2, priority=1
+            literal="⼆", meaning="Two", entry_type=EntryType.RADICAL, level=2, priority=1
         )
         DictionaryEntry.objects.create(
-            literal="三", meaning="Three", type="KANJI", level=1, priority=2
+            literal="三", meaning="Three", entry_type=EntryType.KANJI, level=1, priority=2
         )
 
         radical = DictionaryEntry.objects.get(literal="⼀")
@@ -194,9 +194,9 @@ class InitializeUserDictionaryEntriesTest(TestCase):
             should_unlock = False
 
             if entry.level == 1:
-                if entry.type == "RADICAL":
+                if entry.entry_type == EntryType.RADICAL:
                     should_unlock = True
-                elif entry.type == "KANJI":
+                elif entry.entry_type == EntryType.KANJI:
                     if all(c.level < 1 for c in entry.constituents.all()):
                         should_unlock = True
 

@@ -17,6 +17,12 @@ class SRSStage(models.TextChoices):
     BURNED = "BURNED", "Burned"
 
 
+class EntryType(models.TextChoices):
+    RADICAL = "RADICAL", "Radical"
+    KANJI = "KANJI", "Kanji"
+    VOCAB = "VOCAB", "Vocabulary"
+
+
 # Maps SRSStage enum values to timedelta intervals
 SRS_INTERVALS = {
     SRSStage.APPRENTICE_1: timedelta(hours=4),

@@ -1,6 +1,6 @@
 from django.utils import timezone
 from .models import DictionaryEntry, UserDictionaryEntry  # Adjust the import path if needed
-from .constants import SRSStage  # Adjust path as needed
+from .constants import EntryType, SRSStage  # Adjust path as needed
 
 def initialize_user_dictionary_entries(user):
     entries = DictionaryEntry.objects.prefetch_related("constituents").all()
@@ -14,12 +14,12 @@ def initialize_user_dictionary_entries(user):
         unlocked_at = None
 
         # Rule 1: Unlock level 1 radicals
-        if entry.level == 1 and entry.type == "RADICAL":
+        if entry.level == 1 and entry.entry_type == EntryType.RADICAL:
             srs_stage = SRSStage.LESSON.value
             unlocked_at = now
 
         # Rule 2: Unlock level 1 kanji with only level 0 constituents
-        elif entry.level == 1 and entry.type == "KANJI":
+        elif entry.level == 1 and entry.entry_type == EntryType.KANJI:
             constituents = entry.constituents.all()
             if all(c.level < 1 for c in constituents):
                 srs_stage = SRSStage.LESSON.value

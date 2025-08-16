@@ -2,6 +2,7 @@ from django.contrib import admin
 from django import forms
 from django.contrib.postgres.forms import SimpleArrayField
 from .models import DictionaryEntry, UserDictionaryEntry
+from kanjilearner.constants import EntryType
 
 # Custom form for DictionaryEntry
 class DictionaryEntryForm(forms.ModelForm):
@@ -50,9 +51,9 @@ class DictionaryEntryForm(forms.ModelForm):
 class DictionaryEntryAdmin(admin.ModelAdmin):
     form = DictionaryEntryForm
     readonly_fields = ['id']
-    list_display = ("literal", "type", "meaning", "level", "priority")
+    list_display = ("literal", "entry_type", "meaning", "level", "priority")
     search_fields = ("literal", "meaning", "reading")
-    list_filter = ("type", "level")
+    list_filter = ("level", "entry_type")
     filter_horizontal = ('constituents',)
 
     def get_fieldsets(self, request, obj=None):
@@ -62,14 +63,14 @@ class DictionaryEntryAdmin(admin.ModelAdmin):
             'meaning',
             'level',
             'priority',
-            'type',
+            'entry_type',
         ]
 
         # Add conditional fields
         if obj:
-            if obj.type == "KANJI":
+            if obj.entry_type == EntryType.KANJI:
                 base_fields += ['kunyomi_readings', 'onyomi_readings']
-            elif obj.type == "VOCAB":
+            elif obj.entry_type == EntryType.VOCAB:
                 base_fields += ['readings', 'explanation', 'parts_of_speech']
 
         fieldsets = [
@@ -77,12 +78,12 @@ class DictionaryEntryAdmin(admin.ModelAdmin):
         ]
 
         # Structure only for KANJI or VOCAB
-        if obj and obj.type in ["KANJI", "VOCAB"]:
+        if obj and obj.entry_type in [EntryType.KANJI, EntryType.VOCAB]:
             fieldsets.append(("Structure", {"fields": ['constituents']}))
 
         # Mnemonics
         mnemonic_fields = ['meaning_mnemonic']
-        if obj and obj.type in ["KANJI", "VOCAB"]:
+        if obj and obj.entry_type in [EntryType.KANJI, EntryType.VOCAB]:
             mnemonic_fields.append('reading_mnemonic')
 
         fieldsets.append(("Mnemonics", {"fields": mnemonic_fields}))

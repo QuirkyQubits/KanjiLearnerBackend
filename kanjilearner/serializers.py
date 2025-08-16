@@ -17,7 +17,7 @@ class DictionaryEntrySerializer(serializers.ModelSerializer):
             "kunyomi_readings",
             "onyomi_readings",
             "readings",  # vocab only
-            'type',
+            'entry_type',
             'level',
             'priority',
             'constituents',
@@ -32,7 +32,7 @@ class DictionaryEntrySerializer(serializers.ModelSerializer):
                 "id": c.id,
                 "literal": c.literal,
                 "meaning": c.meaning,
-                "type": c.type,
+                "entry_type": c.entry_type,
             }
             for c in obj.constituents.all()
         ]

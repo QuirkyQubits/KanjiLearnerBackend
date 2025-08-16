@@ -12,20 +12,21 @@ from django.utils import timezone
 from django.contrib.auth.models import User
 from django.db.models import QuerySet
 from typing import Type
-from kanjilearner.constants import SRSStage, SRS_INTERVALS
+from kanjilearner.constants import SRSStage, SRS_INTERVALS, EntryType
 
 
 User = get_user_model()
 
 
 class DictionaryEntry(models.Model):
-    ENTRY_TYPES = [
-        ("RADICAL", "Radical"),
-        ("KANJI", "Kanji"),
-        ("VOCAB", "Vocab"),
-    ]
+    entry_type = models.CharField(
+        max_length=10,
+        choices=EntryType.choices,
+        null=False,
+        blank=False,
+        default=EntryType.RADICAL
+    )
 
-    type = models.CharField(max_length=10, choices=ENTRY_TYPES)
     literal = models.CharField(max_length=10, help_text="The character or string (e.g. 水, 食べる)")
 
     meaning = models.CharField(max_length=255)
@@ -94,11 +95,15 @@ class DictionaryEntry(models.Model):
         ordering = ["level", "priority"]
         
         constraints = [
-            models.UniqueConstraint(fields=["level", "priority"], name="unique_priority_per_level")
+            models.UniqueConstraint(fields=["level", "priority"], name="unique_priority_per_level"),
+            models.CheckConstraint(
+                check=models.Q(entry_type__in=[e.value for e in EntryType]),
+                name="valid_entry_type_only"
+            ),
         ]
 
     def __str__(self):
-        return f"{self.literal} ({self.get_type_display()})"
+        return f"{self.literal} ({self.get_entry_type_display()})"
 
 
 
