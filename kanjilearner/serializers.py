@@ -5,8 +5,8 @@ from kanjilearner.models import DictionaryEntry, UserDictionaryEntry
 class DictionaryEntrySerializer(serializers.ModelSerializer):
     constituents = serializers.SerializerMethodField()
     srs_stage = serializers.SerializerMethodField()
-    unlocked = serializers.SerializerMethodField()
     next_review_at = serializers.SerializerMethodField()
+    unlocked = serializers.SerializerMethodField()
 
     class Meta:
         model = DictionaryEntry
@@ -14,14 +14,16 @@ class DictionaryEntrySerializer(serializers.ModelSerializer):
             'id',
             'literal',
             'meaning',
-            'reading',
+            "kunyomi_readings",
+            "onyomi_readings",
+            "readings",  # vocab only
             'type',
             'level',
             'priority',
             'constituents',
             'srs_stage',
-            'unlocked',
             'next_review_at',
+            'unlocked',
         ]
 
     def get_constituents(self, obj):
@@ -38,7 +40,7 @@ class DictionaryEntrySerializer(serializers.ModelSerializer):
     def get_user_entry(self, obj):
         user = self.context.get('request').user
         try:
-            return UserDictionaryEntry.objects.get(user=user, dictionary_entry=obj)
+            return UserDictionaryEntry.objects.get(user=user, entry=obj)
         except UserDictionaryEntry.DoesNotExist:
             return None
 
@@ -48,7 +50,7 @@ class DictionaryEntrySerializer(serializers.ModelSerializer):
 
     def get_unlocked(self, obj):
         ude = self.get_user_entry(obj)
-        return ude.unlocked if ude else False
+        return ude.is_unlocked if ude else False
 
     def get_next_review_at(self, obj):
         ude = self.get_user_entry(obj)
