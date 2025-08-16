@@ -12,6 +12,7 @@ from django.utils import timezone
 from django.contrib.auth.models import User
 from django.db.models import QuerySet
 from typing import Type
+from kanjilearner.constants import SRSStage, SRS_INTERVALS
 
 
 User = get_user_model()
@@ -101,38 +102,13 @@ class DictionaryEntry(models.Model):
 
 
 class UserDictionaryEntry(models.Model):
-    SRS_STAGES = [
-        ("L", "Lesson"),
-        ("A1", "Apprentice 1"),
-        ("A2", "Apprentice 2"),
-        ("A3", "Apprentice 3"),
-        ("A4", "Apprentice 4"),
-        ("G1", "Guru 1"),
-        ("G2", "Guru 2"),
-        ("M", "Master"),
-        ("E", "Enlightened"),
-        ("B", "Burned"),
-    ]
-
-    SRS_INTERVALS = {
-        "A1": timedelta(hours=4),
-        "A2": timedelta(hours=8),
-        "A3": timedelta(days=1),
-        "A4": timedelta(days=2),
-        "G1": timedelta(days=7),
-        "G2": timedelta(days=14),
-        "M": timedelta(days=30),
-        "E": timedelta(days=120),
-        # "B": no interval; it's final
-    }
-
     user = models.ForeignKey("auth.User", on_delete=models.CASCADE)
     entry = models.ForeignKey("DictionaryEntry", on_delete=models.CASCADE)
     unlocked = models.BooleanField(default=False)
     unlocked_at = models.DateTimeField(null=True, blank=True)
 
     # L, Apprentice 1/2/3/4, Guru 1/2, Master, Enlightened, Burned
-    srs_stage = models.CharField(max_length=2, choices=SRS_STAGES, default="L")
+    srs_stage = models.CharField(max_length=30, choices=SRSStage.choices, default=SRSStage.LOCKED)
     next_review_at = models.DateTimeField(null=True, blank=True)
     last_reviewed_at = models.DateTimeField(null=True, blank=True)
 
@@ -161,14 +137,14 @@ class UserDictionaryEntry(models.Model):
         if not self.unlocked:
             self.unlocked = True
             self.unlocked_at = timezone.now()
-            self.srs_stage = "L"
+            self.srs_stage = SRSStage.LESSON
             self.next_review_at = None  # Waits for lesson to be completed
             self.save()
 
     def complete_lesson(self):
-        if self.srs_stage == "L":
-            self.srs_stage = "A1"
-            self.next_review_at = timezone.now() + self.SRS_INTERVALS["A1"]
+        if self.srs_stage == SRSStage.LESSON:
+            self.srs_stage = SRSStage.APPRENTICE_1
+            self.next_review_at = timezone.now() + SRS_INTERVALS[SRSStage.APPRENTICE_1]
             self.save()
 
 
@@ -177,7 +153,13 @@ class UserDictionaryEntry(models.Model):
         Called when an item reaches G1. Check dependent entries (KANJI or VOCAB),
         and unlock them if all their constituents are unlocked and at G1+.
         """
-        GURU_STAGES = {"G1", "G2", "M", "E", "B"}
+        GURU_STAGES = {
+            SRSStage.GURU_1,
+            SRSStage.GURU_2,
+            SRSStage.MASTER,
+            SRSStage.ENLIGHTENED,
+            SRSStage.BURNED,
+        }
 
         # Get all DictionaryEntry objects that use this entry as a constituent
         dependent_entries = self.entry.used_in.all()
@@ -211,14 +193,27 @@ class UserDictionaryEntry(models.Model):
                 if not user_entry.unlocked:
                     user_entry.unlocked = True
                     user_entry.unlocked_at = timezone.now()
-                    user_entry.srs_stage = "L"
+                    user_entry.srs_stage = SRSStage.LESSON
                     user_entry.next_review_at = None
                     user_entry.save()
 
 
 
     def promote(self):
-        stage_order = ["L", "A1", "A2", "A3", "A4", "G1", "G2", "M", "E", "B"]
+        stage_order = [
+            SRSStage.LOCKED,
+            SRSStage.LESSON,
+            SRSStage.APPRENTICE_1,
+            SRSStage.APPRENTICE_2,
+            SRSStage.APPRENTICE_3,
+            SRSStage.APPRENTICE_4,
+            SRSStage.GURU_1,
+            SRSStage.GURU_2,
+            SRSStage.MASTER,
+            SRSStage.ENLIGHTENED,
+            SRSStage.BURNED,
+        ]
+
         try:
             index = stage_order.index(self.srs_stage)
         except ValueError:
@@ -228,34 +223,34 @@ class UserDictionaryEntry(models.Model):
             self.srs_stage = stage_order[index + 1]
             self.last_reviewed_at = timezone.now()
             self.next_review_at = (
-                timezone.now() + self.SRS_INTERVALS.get(self.srs_stage) if self.srs_stage != "B" else None
+                timezone.now() + SRS_INTERVALS.get(self.srs_stage) if self.srs_stage != SRSStage.BURNED else None
             )
             self.save()
             
             # 🔑 Trigger auto-unlock when hitting G1
-            if self.srs_stage == "G1":
+            if self.srs_stage == SRSStage.GURU_1:
                 self.try_auto_unlock_dependents()
 
     
     def demote(self):
         """Demote item based on SRS rules when user gets it wrong."""
-        if self.srs_stage == "L" or self.srs_stage == "B":
-            return  # No demotion for Lessons or Burned
+        if self.srs_stage in {SRSStage.LOCKED, SRSStage.LESSON, SRSStage.BURNED}:
+            return  # No demotion for Lessons, Burned, Or Init
 
         # Unified demotion map, including A1 → A1 fallback
         demotion_map = {
-            "A1": "A1",
-            "A2": "A1",
-            "A3": "A1",
-            "A4": "A1",
-            "G1": "A4",
-            "G2": "A4",
-            "M":  "G1",
-            "E":  "G1"
+            SRSStage.APPRENTICE_1: SRSStage.APPRENTICE_1,
+            SRSStage.APPRENTICE_2: SRSStage.APPRENTICE_1,
+            SRSStage.APPRENTICE_3: SRSStage.APPRENTICE_1,
+            SRSStage.APPRENTICE_4: SRSStage.APPRENTICE_1,
+            SRSStage.GURU_1: SRSStage.APPRENTICE_4,
+            SRSStage.GURU_2: SRSStage.APPRENTICE_4,
+            SRSStage.MASTER: SRSStage.GURU_1,
+            SRSStage.ENLIGHTENED: SRSStage.GURU_1,
         }
 
-        new_stage = demotion_map.get(self.srs_stage, "A1")  # Safety fallback
+        new_stage = demotion_map.get(self.srs_stage, SRSStage.APPRENTICE_1)  # Safety fallback
         self.srs_stage = new_stage
         self.last_reviewed_at = timezone.now()
-        self.next_review_at = timezone.now() + self.SRS_INTERVALS[new_stage]
+        self.next_review_at = timezone.now() + SRS_INTERVALS[new_stage]
         self.save()

@@ -4,6 +4,7 @@ from django.utils import timezone
 from datetime import timedelta
 from kanjilearner.models import DictionaryEntry, UserDictionaryEntry
 from .utils import initialize_user_dictionary_entries  # adjust if in another module
+from kanjilearner.constants import SRSStage, SRS_INTERVALS
 
 # Use the correct user model (default or custom)
 User = get_user_model()
@@ -36,9 +37,9 @@ class UserDictionaryEntryTests(TestCase):
             entry=self.radical,
             unlocked=True,
             unlocked_at=timezone.now() - timedelta(days=3),
-            srs_stage="G2",
+            srs_stage=SRSStage.GURU_2,
             last_reviewed_at=timezone.now(),
-            next_review_at=timezone.now() + UserDictionaryEntry.SRS_INTERVALS["G2"],
+            next_review_at=timezone.now() + SRS_INTERVALS[SRSStage.GURU_2],
             review_history=[],
         )
 
@@ -48,7 +49,7 @@ class UserDictionaryEntryTests(TestCase):
             entry=self.kanji,
             unlocked=True,
             unlocked_at=timezone.now() - timedelta(days=2),
-            srs_stage="A1",
+            srs_stage=SRSStage.APPRENTICE_1,
             last_reviewed_at=timezone.now() - timedelta(hours=5),
             next_review_at=timezone.now() - timedelta(hours=1),
             review_history=[],
@@ -101,7 +102,7 @@ class AutoUnlockTests(TestCase):
             entry=self.radical,
             unlocked=True,
             unlocked_at=timezone.now() - timedelta(days=5),
-            srs_stage="A4",
+            srs_stage=SRSStage.APPRENTICE_4,
             last_reviewed_at=timezone.now() - timedelta(days=1),
             next_review_at=timezone.now() - timedelta(hours=1),
             review_history=[],
@@ -134,7 +135,7 @@ class AutoUnlockTests(TestCase):
         # Confirm the kanji is unlocked
         kanji_entry.refresh_from_db()
         self.assertTrue(kanji_entry.unlocked)
-        self.assertEqual(kanji_entry.srs_stage, "L")
+        self.assertEqual(kanji_entry.srs_stage, SRSStage.LESSON)
         self.assertIsNone(kanji_entry.next_review_at)
 
     def test_promoting_kanji_unlocks_vocab(self):
@@ -145,7 +146,7 @@ class AutoUnlockTests(TestCase):
         kanji_entry = UserDictionaryEntry.objects.get(user=self.user, entry=self.kanji)
         kanji_entry.unlocked = True
         kanji_entry.unlocked_at = timezone.now() - timedelta(days=1)
-        kanji_entry.srs_stage = "A4"
+        kanji_entry.srs_stage = SRSStage.APPRENTICE_4
         kanji_entry.last_reviewed_at = timezone.now() - timedelta(hours=8)
         kanji_entry.next_review_at = timezone.now() - timedelta(hours=1)
         kanji_entry.save()
@@ -160,7 +161,7 @@ class AutoUnlockTests(TestCase):
         # Confirm vocab gets unlocked
         vocab_entry.refresh_from_db()
         self.assertTrue(vocab_entry.unlocked)
-        self.assertEqual(vocab_entry.srs_stage, "L")
+        self.assertEqual(vocab_entry.srs_stage, SRSStage.LESSON)
         self.assertIsNone(vocab_entry.next_review_at)
 
 
@@ -182,18 +183,31 @@ class InitializeUserDictionaryEntriesTest(TestCase):
     def test_initialize_user_dictionary_entries(self):
         initialize_user_dictionary_entries(self.user)
 
-        entries = DictionaryEntry.objects.all()
+        entries = DictionaryEntry.objects.prefetch_related("constituents").all()
         user_entries = UserDictionaryEntry.objects.filter(user=self.user)
 
         self.assertEqual(user_entries.count(), entries.count())
 
         for entry in entries:
             user_entry = user_entries.get(entry=entry)
-            if entry.level == 1 and entry.type == "RADICAL":
-                self.assertTrue(user_entry.unlocked)
+
+            # Expect unlocked if:
+            # - Level 1 radical
+            # - OR Level 1 kanji with only level 0 constituents
+            should_unlock = False
+
+            if entry.level == 1:
+                if entry.type == "RADICAL":
+                    should_unlock = True
+                elif entry.type == "KANJI":
+                    if all(c.level < 1 for c in entry.constituents.all()):
+                        should_unlock = True
+
+            if should_unlock:
+                self.assertTrue(user_entry.unlocked, f"Expected {entry} to be unlocked")
                 self.assertIsNotNone(user_entry.unlocked_at)
             else:
-                self.assertFalse(user_entry.unlocked)
+                self.assertFalse(user_entry.unlocked, f"Expected {entry} to be locked")
                 self.assertIsNone(user_entry.unlocked_at)
 
         for ue in user_entries:
