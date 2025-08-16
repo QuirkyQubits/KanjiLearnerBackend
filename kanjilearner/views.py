@@ -1,4 +1,5 @@
-from datetime import timedelta
+from collections import defaultdict
+from datetime import datetime, timedelta
 from kanjilearner.constants import SRSStage
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -6,7 +7,7 @@ from rest_framework.response import Response
 from django.utils import timezone
 from kanjilearner.models import DictionaryEntry, RecentMistake, UserDictionaryEntry
 from kanjilearner.serializers import DictionaryEntrySerializer
-import json
+from zoneinfo import ZoneInfo
 
 
 @api_view(['GET'])
@@ -79,3 +80,122 @@ def get_recent_mistakes(request):
     entries = [rm.entry for rm in recent_mistakes]
     serializer = DictionaryEntrySerializer(entries, many=True)
     return Response(serializer.data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def result_success(request):
+    """
+    Mark a review as successful and promote the corresponding SRS stage.
+    Payload:
+        {
+            "entry_id": <int>
+        }
+    """
+    entry_id = request.data.get("entry_id")
+    if entry_id is None:
+        return Response({"error": "Missing entry_id"}, status=400)
+
+    try:
+        entry = DictionaryEntry.objects.get(id=entry_id)
+        user_entry = UserDictionaryEntry.objects.get(user=request.user, entry=entry)
+    except (DictionaryEntry.DoesNotExist, UserDictionaryEntry.DoesNotExist):
+        return Response({"error": "Entry not found or not unlocked."}, status=404)
+
+    user_entry.promote()
+    return Response({
+        "message": f"{entry.literal} promoted",
+        "new_stage": user_entry.srs_stage,
+        "next_review_at": user_entry.next_review_at,
+    })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def result_failure(request):
+    """
+    Mark a review as failed and demote the corresponding SRS stage.
+    Also appends to RecentMistake.
+    Payload:
+        {
+            "entry_id": <int>
+        }
+    """
+    entry_id = request.data.get("entry_id")
+    if entry_id is None:
+        return Response({"error": "Missing entry_id"}, status=400)
+
+    try:
+        entry = DictionaryEntry.objects.get(id=entry_id)
+        user_entry = UserDictionaryEntry.objects.get(user=request.user, entry=entry)
+    except (DictionaryEntry.DoesNotExist, UserDictionaryEntry.DoesNotExist):
+        return Response({"error": "Entry not found or not unlocked."}, status=404)
+
+    user_entry.demote()
+    UserDictionaryEntry.record_recent_mistake(user=request.user, entry=entry)
+
+    return Response({
+        "message": f"{entry.literal} demoted",
+        "new_stage": user_entry.srs_stage,
+        "next_review_at": user_entry.next_review_at,
+    })
+
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_review_forecast(request):
+    """
+    Return upcoming reviews from now until 11:59 PM today,
+    bucketed by local hour (0-23) in the user's timezone.
+    """
+    user_tz_str = request.query_params.get("tz")  # e.g. "America/Los_Angeles"
+    if not user_tz_str:
+        return Response({"error": "Missing 'tz' timezone parameter"}, status=400)
+
+    try:
+        user_tz = ZoneInfo(user_tz_str)
+    except Exception:
+        return Response({"error": f"Unknown timezone: {user_tz_str}"}, status=400)
+
+    now_utc = timezone.now()
+    now_local = now_utc.astimezone(user_tz)
+
+    # Build local end of day
+    local_day_end = datetime(
+        year=now_local.year,
+        month=now_local.month,
+        day=now_local.day,
+        hour=23,
+        minute=59,
+        second=59,
+        tzinfo=user_tz
+    )
+
+    utc_start = now_local.astimezone(timezone.utc)
+    utc_end = local_day_end.astimezone(timezone.utc)
+
+    # Get upcoming reviews between now and 11:59 PM local time
+    upcoming_reviews = (
+        UserDictionaryEntry.objects
+        .filter(user=request.user)
+        .exclude(srs_stage__in=[SRSStage.LOCKED, SRSStage.LESSON])
+        .filter(next_review_at__gt=utc_start, next_review_at__lte=utc_end)
+        .values_list("next_review_at", flat=True)
+    )
+
+    # Bucket by local hour
+    buckets = defaultdict(int)
+    for dt in upcoming_reviews:
+        local_hour = dt.astimezone(user_tz).hour
+        buckets[local_hour] += 1
+
+    # Build result with cumulative totals
+    result = {}
+    cumulative = 0
+    for hour in sorted(buckets):
+        count = buckets[hour]
+        cumulative += count
+        result[str(hour)] = {"count": count, "cumulative": cumulative}
+
+    return Response(result)
