@@ -101,6 +101,19 @@ class DictionaryEntry(models.Model):
         return f"{self.literal} ({self.get_type_display()})"
 
 
+
+class RecentMistake(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='recent_mistakes')
+    entry = models.ForeignKey(DictionaryEntry, on_delete=models.CASCADE)
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['user', 'timestamp']),
+        ]
+        ordering = ['-timestamp']
+
+
 class UserDictionaryEntry(models.Model):
     user = models.ForeignKey("auth.User", on_delete=models.CASCADE)
     entry = models.ForeignKey("DictionaryEntry", on_delete=models.CASCADE)
@@ -271,3 +284,27 @@ class UserDictionaryEntry(models.Model):
         self.last_reviewed_at = timezone.now()
         self.next_review_at = timezone.now() + SRS_INTERVALS[new_stage]
         self.save()
+    
+    
+    def record_recent_mistake(user, entry):
+        now = timezone.now()
+
+        # Delete old ones past 24h
+        RecentMistake.objects.filter(user=user, timestamp__lt=now - timedelta(hours=24)).delete()
+
+        # Count how many are left after purge
+        count = RecentMistake.objects.filter(user=user).count()
+
+        if count >= 50:
+            # Delete the oldest to make room
+            oldest = (
+                RecentMistake.objects
+                .filter(user=user)
+                .order_by('timestamp')
+                .first()
+            )
+            if oldest:
+                oldest.delete()
+
+        # Create the new mistake
+        RecentMistake.objects.create(user=user, entry=entry)
