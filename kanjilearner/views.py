@@ -41,18 +41,40 @@ def get_lessons(request):
     Return lessons for the user that have been unlocked but not yet started (srs_stage == "L").
     Supports ?limit=... query param.
     """
-    limit = int(request.query_params.get("limit", 100))  # default to 100 if not specified
 
+    limit = int(request.query_params.get("limit", 100))
+
+    # Step 1: Load all UDEs with dictionary entries
     user_entries = (
         UserDictionaryEntry.objects
-        .filter(user=request.user, srs_stage=SRSStage.LESSON)  # Already filtered to unlocked lessons
+        .filter(user=request.user, srs_stage=SRSStage.LESSON)
         .select_related("entry")
     )
 
+    # Step 2: Extract and sort dictionary entries
     entries = [ude.entry for ude in user_entries]
     entries.sort(key=lambda e: (e.level, e.priority))
 
-    serializer = DictionaryEntrySerializer(entries[:limit], many=True, context={"request": request})
+    # Step 3: Apply limit
+    limited_entries = entries[:limit]
+
+    # Step 4: Build a filtered entry map for serializer context
+    entry_map = {
+        entry.id: ude
+        for ude in user_entries
+        for entry in [ude.entry]
+        if entry.id in {e.id for e in limited_entries}
+    }
+
+    # Step 5: Serialize with context
+    serializer = DictionaryEntrySerializer(
+        limited_entries,
+        many=True,
+        context={
+            "request": request,
+            "user_entry_map": entry_map
+        }
+    )
     return Response(serializer.data)
 
 

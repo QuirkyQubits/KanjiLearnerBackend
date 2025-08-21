@@ -24,6 +24,11 @@ class DictionaryEntrySerializer(serializers.ModelSerializer):
             'srs_stage',
             'next_review_at',
             'unlocked',
+            'meaning_mnemonic',
+            'reading_mnemonic',
+            'parts_of_speech',
+            'explanation',
+            'audio',
         ]
 
     def get_constituents(self, obj):
@@ -38,11 +43,8 @@ class DictionaryEntrySerializer(serializers.ModelSerializer):
         ]
 
     def get_user_entry(self, obj):
-        user = self.context.get('request').user
-        try:
-            return UserDictionaryEntry.objects.get(user=user, entry=obj)
-        except UserDictionaryEntry.DoesNotExist:
-            return None
+        entry_map = self.context.get("user_entry_map", {})
+        return entry_map.get(obj.id)
 
     def get_srs_stage(self, obj):
         ude = self.get_user_entry(obj)
