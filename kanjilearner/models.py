@@ -183,57 +183,6 @@ class UserDictionaryEntry(models.Model):
             self.save()
 
 
-    def try_auto_unlock_dependents(self):
-        """
-        Called when an item reaches G1. Check dependent entries (KANJI or VOCAB),
-        and unlock them if all their constituents are unlocked and at G1+.
-        """
-        GURU_STAGES = {
-            SRSStage.GURU_1,
-            SRSStage.GURU_2,
-            SRSStage.MASTER,
-            SRSStage.ENLIGHTENED,
-            SRSStage.BURNED,
-        }
-
-        # Get all DictionaryEntry objects that use this entry as a constituent
-        dependent_entries = self.entry.used_in.all()
-
-        for dependent_entry in dependent_entries:
-            # Skip if the user already unlocked this dependent
-            if UserDictionaryEntry.objects.filter(user=self.user, entry=dependent_entry).exclude(srs_stage=SRSStage.LOCKED).exists():
-                continue
-
-            all_ready = True
-
-            for constituent in dependent_entry.constituents.all():
-                try:
-                    constituent_user_entry = UserDictionaryEntry.objects.get(user=self.user, entry=constituent)
-                    if not constituent_user_entry.is_unlocked or constituent_user_entry.srs_stage not in GURU_STAGES:
-                        all_ready = False
-                        break
-                except UserDictionaryEntry.DoesNotExist:
-                    all_ready = False
-                    break
-
-            if all_ready:
-                # Unlock the dependent entry
-                try:
-                    user_entry = UserDictionaryEntry.objects.get(user=self.user, entry=dependent_entry)
-                except UserDictionaryEntry.DoesNotExist:
-                    raise RuntimeError(
-                        f"UserDictionaryEntry missing for user={self.user.username} entry={dependent_entry.literal} (id={dependent_entry.id})"
-                    )
-
-                if not user_entry.is_unlocked:
-                    user_entry.unlocked = True
-                    user_entry.unlocked_at = timezone.now()
-                    user_entry.srs_stage = SRSStage.LESSON
-                    user_entry.next_review_at = None
-                    user_entry.save()
-
-
-
     def promote(self):
         stage_order = [
             SRSStage.LOCKED,
@@ -261,10 +210,6 @@ class UserDictionaryEntry(models.Model):
                 timezone.now() + SRS_INTERVALS.get(self.srs_stage) if self.srs_stage != SRSStage.BURNED else None
             )
             self.save()
-            
-            # 🔑 Trigger auto-unlock when hitting G1
-            if self.srs_stage == SRSStage.GURU_1:
-                self.try_auto_unlock_dependents()
 
     
     def demote(self):
@@ -313,3 +258,16 @@ class UserDictionaryEntry(models.Model):
 
         # Create the new mistake
         RecentMistake.objects.create(user=user, entry=entry)
+
+
+
+class PlannedEntry(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    entry = models.ForeignKey(DictionaryEntry, on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("user", "entry")
+
+    def __str__(self):
+        return f"{self.user.username} → {self.entry.literal} (planned)"

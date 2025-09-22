@@ -11,4 +11,8 @@ urlpatterns = [
     path("api/review_forecast/", views.get_review_forecast, name="get_review_forecast"),
     path('api/result/success/', views.result_success, name='result_success'),
     path('api/result/failure/', views.result_failure, name='result_failure'),
+    path("api/search", views.search, name="search"),
+    path("api/dictionary/<int:pk>/", views.entry_detail, name="entry_detail"),
+    path("api/planned/", views.get_planned, name="get_planned"),
+    path("api/plan_add/", views.plan_add, name="plan_add"),
 ]

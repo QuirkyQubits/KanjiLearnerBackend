@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from kanjilearner.models import DictionaryEntry, UserDictionaryEntry
+from kanjilearner.models import DictionaryEntry, PlannedEntry, UserDictionaryEntry
 
 
 class DictionaryEntrySerializer(serializers.ModelSerializer):
@@ -57,3 +57,21 @@ class DictionaryEntrySerializer(serializers.ModelSerializer):
     def get_next_review_at(self, obj):
         ude = self.get_user_entry(obj)
         return ude.next_review_at if ude else None
+
+
+class UserDictionaryEntrySerializer(serializers.ModelSerializer):
+    entry = DictionaryEntrySerializer(read_only=True)
+    in_plan = serializers.SerializerMethodField()
+
+    class Meta:
+        model = UserDictionaryEntry
+        fields = [
+            "entry",
+            "srs_stage",
+            "unlocked_at",
+            "next_review_at",
+            "in_plan",
+        ]
+
+    def get_in_plan(self, obj):
+        return PlannedEntry.objects.filter(user=obj.user, entry=obj.entry).exists()

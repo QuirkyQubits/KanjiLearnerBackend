@@ -3,14 +3,17 @@ from datetime import datetime, timedelta
 from datetime import timezone as dt_timezone
 from django.utils import timezone as dj_timezone
 from kanjilearner.constants import SRSStage
+from kanjilearner.services.plan import process_planned_entries
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
-from kanjilearner.models import DictionaryEntry, RecentMistake, UserDictionaryEntry
-from kanjilearner.serializers import DictionaryEntrySerializer
+from kanjilearner.models import DictionaryEntry, PlannedEntry, RecentMistake, UserDictionaryEntry
+from kanjilearner.serializers import DictionaryEntrySerializer, UserDictionaryEntrySerializer
+from kanjilearner.services.plan import plan_entry
 from zoneinfo import ZoneInfo
 from django.contrib.auth import authenticate, login
 from django.views.decorators.csrf import ensure_csrf_cookie
+from django.db.models import Q
 
 
 @api_view(['GET'])
@@ -38,43 +41,19 @@ def login_view(request):
 @permission_classes([IsAuthenticated])
 def get_lessons(request):
     """
-    Return lessons for the user that have been unlocked but not yet started (srs_stage == "L").
+    Return lessons for the user that have been unlocked but not yet started (srs_stage == LESSON).
     Supports ?limit=... query param.
     """
-
     limit = int(request.query_params.get("limit", 100))
 
-    # Step 1: Load all UDEs with dictionary entries
-    user_entries = (
+    udes = (
         UserDictionaryEntry.objects
         .filter(user=request.user, srs_stage=SRSStage.LESSON)
         .select_related("entry")
+        .order_by("entry__level", "entry__priority")[:limit]
     )
 
-    # Step 2: Extract and sort dictionary entries
-    entries = [ude.entry for ude in user_entries]
-    entries.sort(key=lambda e: (e.level, e.priority))
-
-    # Step 3: Apply limit
-    limited_entries = entries[:limit]
-
-    # Step 4: Build a filtered entry map for serializer context
-    entry_map = {
-        entry.id: ude
-        for ude in user_entries
-        for entry in [ude.entry]
-        if entry.id in {e.id for e in limited_entries}
-    }
-
-    # Step 5: Serialize with context
-    serializer = DictionaryEntrySerializer(
-        limited_entries,
-        many=True,
-        context={
-            "request": request,
-            "user_entry_map": entry_map
-        }
-    )
+    serializer = UserDictionaryEntrySerializer(udes, many=True)
     return Response(serializer.data)
 
 
@@ -91,18 +70,16 @@ def get_reviews(request):
     limit = int(request.query_params.get("limit", 100))
     now = datetime.now(dt_timezone.utc)
 
-    user_entries = (
+    udes = (
         UserDictionaryEntry.objects
         .filter(user=request.user)
-        .exclude(srs_stage__in=[SRSStage.LOCKED, SRSStage.LESSON])  # exclude LOCKED and LESSON
+        .exclude(srs_stage__in=[SRSStage.LOCKED, SRSStage.LESSON])
         .filter(next_review_at__lte=now)
         .select_related("entry")
+        .order_by("entry__level", "entry__priority")[:limit]
     )
 
-    entries = [ude.entry for ude in user_entries]
-    entries.sort(key=lambda e: (e.level, e.priority))
-
-    serializer = DictionaryEntrySerializer(entries[:limit], many=True)
+    serializer = UserDictionaryEntrySerializer(udes, many=True)
     return Response(serializer.data)
 
 
@@ -123,9 +100,15 @@ def get_recent_mistakes(request):
         .order_by('-timestamp')[:50]
     )
 
-    entries = [rm.entry for rm in recent_mistakes]
-    serializer = DictionaryEntrySerializer(entries, many=True)
+    # Map mistakes back into UDEs
+    udes = [
+        UserDictionaryEntry.objects.get_or_create(user=request.user, entry=rm.entry)[0]
+        for rm in recent_mistakes
+    ]
+
+    serializer = UserDictionaryEntrySerializer(udes, many=True)
     return Response(serializer.data)
+
 
 
 @api_view(['POST'])
@@ -149,6 +132,9 @@ def result_success(request):
         return Response({"error": "Entry not found or not unlocked."}, status=404)
 
     user_entry.promote()
+
+    process_planned_entries(request.user)
+
     return Response({
         "message": f"{entry.literal} promoted",
         "new_stage": user_entry.srs_stage,
@@ -245,3 +231,79 @@ def get_review_forecast(request):
         result[str(hour)] = {"count": count, "cumulative": cumulative}
 
     return Response(result)
+
+
+@api_view(['GET'])
+def search(request):
+    """
+    Search DictionaryEntry by kanji, kana reading, or meaning.
+    Supports ?q=<query>&limit=...
+    """
+    query = request.query_params.get("q", "").strip()
+    limit = int(request.query_params.get("limit", 50)) # change this if necessary
+
+    if not query:
+        return Response({"error": "Missing 'q' parameter"}, status=400)
+
+    entries = (
+        DictionaryEntry.objects
+        .filter(
+            Q(literal__icontains=query) |
+            Q(meaning__icontains=query) |
+            Q(kunyomi_readings__icontains=query) |
+            Q(onyomi_readings__icontains=query) |
+            Q(readings__icontains=query)
+        )
+        .order_by("level", "priority")[:limit]
+    )
+
+    # For each result, get/create the corresponding UDE
+    udes = [
+        UserDictionaryEntry.objects.get_or_create(user=request.user, entry=e)[0]
+        for e in entries
+    ]
+
+    serializer = UserDictionaryEntrySerializer(udes, many=True)
+    return Response(serializer.data)
+
+
+@api_view(['GET'])
+def entry_detail(request, pk):
+    try:
+        entry = DictionaryEntry.objects.get(pk=pk)
+    except DictionaryEntry.DoesNotExist:
+        return Response({"error": "Not found"}, status=404)
+
+    ude, _ = UserDictionaryEntry.objects.get_or_create(user=request.user, entry=entry)
+    serializer = UserDictionaryEntrySerializer(ude)
+    return Response(serializer.data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def plan_add(request):
+    entry_id = request.data.get("entry_id")
+    if not entry_id:
+        return Response({"error": "Missing entry_id"}, status=400)
+
+    try:
+        entry = DictionaryEntry.objects.get(id=entry_id)
+    except DictionaryEntry.DoesNotExist:
+        return Response({"error": "Entry not found"}, status=404)
+
+    plan_entry(request.user, entry)
+    return Response({"message": f"{entry.literal} planned"})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_planned(request):
+    planned = PlannedEntry.objects.filter(user=request.user).select_related("entry")
+
+    # Convert planned entries into UDEs for this user
+    udes = [
+        UserDictionaryEntry.objects.get_or_create(user=request.user, entry=p.entry)[0] for p in planned
+    ]
+
+    serializer = UserDictionaryEntrySerializer(udes, many=True)
+    return Response(serializer.data)
