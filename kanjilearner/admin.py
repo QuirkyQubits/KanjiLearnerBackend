@@ -51,8 +51,8 @@ class DictionaryEntryForm(forms.ModelForm):
 class DictionaryEntryAdmin(admin.ModelAdmin):
     form = DictionaryEntryForm
     readonly_fields = ['id']
-    list_display = ("literal", "entry_type", "meaning", "level", "priority")
-    search_fields = ("literal", "meaning", "reading")
+    list_display = ("literal", "entry_type", "meaning", "level")
+    search_fields = ("literal", "meaning", "readings")
     list_filter = ("level", "entry_type")
     filter_horizontal = ('constituents',)
 
@@ -62,7 +62,6 @@ class DictionaryEntryAdmin(admin.ModelAdmin):
             'literal',
             'meaning',
             'level',
-            'priority',
             'entry_type',
         ]
 

@@ -50,7 +50,7 @@ def get_lessons(request):
         UserDictionaryEntry.objects
         .filter(user=request.user, srs_stage=SRSStage.LESSON)
         .select_related("entry")
-        .order_by("entry__level", "entry__priority")[:limit]
+        .order_by("entry__level")[:limit]
     )
 
     serializer = UserDictionaryEntrySerializer(udes, many=True)
@@ -76,7 +76,7 @@ def get_reviews(request):
         .exclude(srs_stage__in=[SRSStage.LOCKED, SRSStage.LESSON])
         .filter(next_review_at__lte=now)
         .select_related("entry")
-        .order_by("entry__level", "entry__priority")[:limit]
+        .order_by("entry__level")[:limit]
     )
 
     serializer = UserDictionaryEntrySerializer(udes, many=True)
@@ -254,7 +254,7 @@ def search(request):
             Q(onyomi_readings__icontains=query) |
             Q(readings__icontains=query)
         )
-        .order_by("level", "priority")[:limit]
+        .order_by("level")[:limit]
     )
 
     # For each result, get/create the corresponding UDE

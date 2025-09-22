@@ -65,9 +65,6 @@ class DictionaryEntry(models.Model):
         help_text="Explanation to help remember the meaning"
     )
 
-    # priority for with a level, for front-end ordering and lessons priority
-    priority = models.PositiveIntegerField(default=1, help_text="Ordering within a level")
-
     PARTS_OF_SPEECH_CHOICES = [
         ("noun", "Noun"),
         ("suru_noun", "する-Noun"),
@@ -92,10 +89,9 @@ class DictionaryEntry(models.Model):
     )
 
     class Meta:
-        ordering = ["level", "priority"]
+        ordering = ["level"]
         
         constraints = [
-            models.UniqueConstraint(fields=["level", "priority"], name="unique_priority_per_level"),
             models.CheckConstraint(
                 check=models.Q(entry_type__in=[e.value for e in EntryType]),
                 name="valid_entry_type_only"

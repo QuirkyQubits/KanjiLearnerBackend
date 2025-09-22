@@ -19,7 +19,6 @@ class DictionaryEntrySerializer(serializers.ModelSerializer):
             "readings",  # vocab only
             'entry_type',
             'level',
-            'priority',
             'constituents',
             'srs_stage',
             'next_review_at',
