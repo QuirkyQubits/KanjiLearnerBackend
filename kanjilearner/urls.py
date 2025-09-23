@@ -15,4 +15,5 @@ urlpatterns = [
     path("api/dictionary/<int:pk>/", views.entry_detail, name="entry_detail"),
     path("api/planned/", views.get_planned, name="get_planned"),
     path("api/plan_add/", views.plan_add, name="plan_add"),
+    path("api/whoami/", views.whoami, name="whoami"),
 ]

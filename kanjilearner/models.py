@@ -96,6 +96,12 @@ class DictionaryEntry(models.Model):
                 check=models.Q(entry_type__in=[e.value for e in EntryType]),
                 name="valid_entry_type_only"
             ),
+
+            models.UniqueConstraint(
+                fields=["literal", "entry_type"],
+                name="unique_literal_entrytype",
+                condition=~models.Q(literal="")  # allow duplicates if literal is empty
+            ),
         ]
 
     def __str__(self):

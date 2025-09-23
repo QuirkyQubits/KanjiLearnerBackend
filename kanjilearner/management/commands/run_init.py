@@ -5,6 +5,7 @@ from kanjilearner.models import UserDictionaryEntry
 from kanjilearner.constants import EntryType, SRSStage
 from kanjilearner.models import DictionaryEntry
 from django.contrib.auth.models import User
+from django.db.models import Count
 
 
 User = get_user_model()
@@ -58,6 +59,23 @@ def insert_radicals():
     print(f"Inserted {len(entries)} radicals into level 0.")
 
 
+def check_dupes():
+    dupes = (
+        DictionaryEntry.objects
+        .filter(level=0, entry_type=EntryType.RADICAL)        # only level 0 radicals
+        .exclude(literal="")                                  # ignore blanks
+        .values("literal")
+        .annotate(count=Count("id"))
+        .filter(count__gt=1)                                  # only duplicates
+    )
+    
+    total_dupes = dupes.count()
+    print(f"Found {total_dupes} duplicate radicals in level 0.")
+
+    for d in dupes:
+        print(f"Literal: {d['literal'].encode('utf-8', errors='replace')}, Count: {d['count']}")
+
+
 class Command(BaseCommand):
     help = "Initialize dictionary entries for the admin user"
 
@@ -69,6 +87,6 @@ class Command(BaseCommand):
         
         # initialize_user_dictionary_entries(user)
 
-        insert_radicals()
+        # check_dupes()
 
         self.stdout.write(self.style.SUCCESS("Initialization complete."))

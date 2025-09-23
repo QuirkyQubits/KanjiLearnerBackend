@@ -19,18 +19,18 @@ class UserDictionaryEntryTests(TestCase):
 
         # Radical
         self.radical = DictionaryEntry.objects.create(
-            literal="⼈", meaning="person", entry_type=EntryType.RADICAL, level=1, priority=1
+            literal="⼈", meaning="person", entry_type=EntryType.RADICAL, level=1
         )
 
         # Kanji that depends on radical
         self.kanji = DictionaryEntry.objects.create(
-            literal="人", meaning="person", entry_type=EntryType.KANJI, level=1, priority=2
+            literal="人", meaning="person", entry_type=EntryType.KANJI, level=1
         )
         self.kanji.constituents.add(self.radical)
 
         # Vocab that depends on kanji
         self.vocab = DictionaryEntry.objects.create(
-            literal="人々", meaning="people", entry_type=EntryType.VOCAB, level=1, priority=3
+            literal="人々", meaning="people", entry_type=EntryType.VOCAB, level=1
         )
         self.vocab.constituents.add(self.kanji)
 
@@ -84,13 +84,13 @@ class InitializeUserDictionaryEntriesTest(TestCase):
 
         # Sample dictionary entries
         DictionaryEntry.objects.create(
-            literal="⼀", meaning="One", entry_type=EntryType.RADICAL, level=1, priority=1
+            literal="⼀", meaning="One", entry_type=EntryType.RADICAL, level=1
         )
         DictionaryEntry.objects.create(
-            literal="⼆", meaning="Two", entry_type=EntryType.RADICAL, level=2, priority=1
+            literal="⼆", meaning="Two", entry_type=EntryType.RADICAL, level=2
         )
         DictionaryEntry.objects.create(
-            literal="三", meaning="Three", entry_type=EntryType.KANJI, level=1, priority=2
+            literal="三", meaning="Three", entry_type=EntryType.KANJI, level=1
         )
 
         radical = DictionaryEntry.objects.get(literal="⼀")
@@ -143,7 +143,6 @@ class DictionarySearchTests(TestCase):
             kunyomi_readings=["まける"],
             onyomi_readings=["フ"],
             level=10,
-            priority=1
         )
         self.entry_vocab = DictionaryEntry.objects.create(
             entry_type=EntryType.VOCAB,
@@ -151,7 +150,6 @@ class DictionarySearchTests(TestCase):
             meaning="rain",
             readings=["あめ"],
             level=5,
-            priority=1
         )
         self.entry_kanji = DictionaryEntry.objects.create(
             entry_type=EntryType.KANJI,
@@ -160,45 +158,47 @@ class DictionarySearchTests(TestCase):
             kunyomi_readings=["まける"],
             onyomi_readings=["フ"],
             level=10,
-            priority=2
         )
 
     def test_search_by_literal(self):
         url = reverse("search")
         resp = self.client.get(url, {"q": "負"})
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.data[0]["entry"]["literal"], "負")
-        self.assertEqual(resp.data[1]["entry"]["literal"], "負け犬")
+        results = resp.data["results"]
+        self.assertEqual(results[0]["entry"]["literal"], "負")
+        self.assertEqual(results[1]["entry"]["literal"], "負け犬")
 
     def test_search_by_kunyomi(self):
         url = reverse("search")
         resp = self.client.get(url, {"q": "まける"})
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.data[0]["entry"]["literal"], "負")
+        results = resp.data["results"]
+        self.assertEqual(results[0]["entry"]["literal"], "負")
 
     def test_search_by_onyomi(self):
         url = reverse("search")
         resp = self.client.get(url, {"q": "フ"})
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.data[0]["entry"]["literal"], "負")
+        results = resp.data["results"]
+        self.assertEqual(results[0]["entry"]["literal"], "負")
 
     def test_search_by_vocab_reading(self):
         url = reverse("search")
         resp = self.client.get(url, {"q": "あめ"})
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.data[0]["entry"]["literal"], "雨")
+        results = resp.data["results"]
+        self.assertEqual(results[0]["entry"]["literal"], "雨")
 
     def test_search_by_meaning(self):
         url = reverse("search")
         resp = self.client.get(url, {"q": "rain"})
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.data[0]["entry"]["literal"], "雨")
+        results = resp.data["results"]
+        self.assertEqual(results[0]["entry"]["literal"], "雨")
 
     def test_search_no_results(self):
         url = reverse("search")
         resp = self.client.get(url, {"q": "banana"})
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(len(resp.data), 0)
+        results = resp.data["results"]
+        self.assertEqual(len(results), 0)
 
     def test_missing_query(self):
         url = reverse("search")
@@ -220,7 +220,6 @@ class EntryDetailViewTests(TestCase):
             readings=[],
             entry_type=EntryType.KANJI,
             level=1,
-            priority=1,
         )
 
     def test_entry_detail_success(self):
@@ -250,20 +249,20 @@ class PlanEntryTests(TestCase):
         """
 
         # Build radicals A, B, C
-        A = DictionaryEntry.objects.create(entry_type="RADICAL", literal="A", meaning="radical A", level=1, priority=1)
-        B = DictionaryEntry.objects.create(entry_type="RADICAL", literal="B", meaning="radical B", level=1, priority=2)
-        C = DictionaryEntry.objects.create(entry_type="RADICAL", literal="C", meaning="radical C", level=1, priority=3)
+        A = DictionaryEntry.objects.create(entry_type="RADICAL", literal="A", meaning="radical A", level=1)
+        B = DictionaryEntry.objects.create(entry_type="RADICAL", literal="B", meaning="radical B", level=1)
+        C = DictionaryEntry.objects.create(entry_type="RADICAL", literal="C", meaning="radical C", level=1)
 
         # Build kanji X (needs A,B,C)
-        X = DictionaryEntry.objects.create(entry_type="KANJI", literal="X", meaning="kanji X", level=2, priority=1)
+        X = DictionaryEntry.objects.create(entry_type="KANJI", literal="X", meaning="kanji X", level=2)
         X.constituents.add(A, B, C)
 
         # Build kanji Y and Z (no dependencies for simplicity)
-        Y = DictionaryEntry.objects.create(entry_type="KANJI", literal="Y", meaning="kanji Y", level=2, priority=2)
-        Z = DictionaryEntry.objects.create(entry_type="KANJI", literal="Z", meaning="kanji Z", level=2, priority=3)
+        Y = DictionaryEntry.objects.create(entry_type="KANJI", literal="Y", meaning="kanji Y", level=2)
+        Z = DictionaryEntry.objects.create(entry_type="KANJI", literal="Z", meaning="kanji Z", level=2)
 
         # Build vocab XYZ (needs X, Y, Z)
-        XYZ = DictionaryEntry.objects.create(entry_type="VOCAB", literal="XYZ", meaning="word XYZ", level=3, priority=1)
+        XYZ = DictionaryEntry.objects.create(entry_type="VOCAB", literal="XYZ", meaning="word XYZ", level=3)
         XYZ.constituents.add(X, Y, Z)
 
         # Plan to learn XYZ
@@ -338,10 +337,10 @@ class PlannedEntriesAPITests(TestCase):
 
         # Create dictionary entries
         self.kanji1 = DictionaryEntry.objects.create(
-            literal="火", meaning="fire", entry_type=EntryType.KANJI, level=1, priority=1
+            literal="火", meaning="fire", entry_type=EntryType.KANJI, level=1
         )
         self.kanji2 = DictionaryEntry.objects.create(
-            literal="水", meaning="water", entry_type=EntryType.KANJI, level=1, priority=2
+            literal="水", meaning="water", entry_type=EntryType.KANJI, level=1
         )
 
         # Give user UDE for kanji1
@@ -400,7 +399,6 @@ class PlanAddAPITests(TestCase):
             meaning="win",
             entry_type=EntryType.KANJI,
             level=1,
-            priority=1,
         )
 
     def test_plan_add_success(self):
@@ -449,7 +447,6 @@ class PlanAddAPITests(TestCase):
             meaning="power",
             entry_type=EntryType.RADICAL,
             level=1,
-            priority=2,
         )
 
         # Create a kanji that depends on radical
@@ -458,7 +455,6 @@ class PlanAddAPITests(TestCase):
             meaning="effect",
             entry_type=EntryType.KANJI,
             level=2,
-            priority=1,
         )
         dependent_kanji.constituents.add(radical)
 
@@ -484,7 +480,6 @@ class PlanAddAPITests(TestCase):
             meaning="tree",
             entry_type=EntryType.RADICAL,
             level=1,
-            priority=3,
         )
 
         # Create a kanji that depends on radical
@@ -493,7 +488,6 @@ class PlanAddAPITests(TestCase):
             meaning="woods",
             entry_type=EntryType.KANJI,
             level=2,
-            priority=4,
         )
         dependent_kanji.constituents.add(radical)
 

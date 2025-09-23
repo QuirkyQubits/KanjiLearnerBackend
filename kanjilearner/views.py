@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from datetime import timezone as dt_timezone
 from django.utils import timezone as dj_timezone
 from kanjilearner.constants import SRSStage
+from kanjilearner.pagination import SearchPagination
 from kanjilearner.services.plan import process_planned_entries
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -20,6 +21,15 @@ from django.db.models import Q
 @ensure_csrf_cookie
 def get_csrf_token(request):
     return Response({"message": "CSRF cookie set"})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def whoami(request):
+    return Response({
+        "username": request.user.username,
+        "id": request.user.id,
+    })
 
 
 @api_view(['POST'])
@@ -234,37 +244,35 @@ def get_review_forecast(request):
 
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def search(request):
     """
     Search DictionaryEntry by kanji, kana reading, or meaning.
-    Supports ?q=<query>&limit=...
+    Supports ?q=<query>&page=<n>&page_size=<m>.
     """
     query = request.query_params.get("q", "").strip()
-    limit = int(request.query_params.get("limit", 50)) # change this if necessary
-
     if not query:
         return Response({"error": "Missing 'q' parameter"}, status=400)
 
-    entries = (
-        DictionaryEntry.objects
-        .filter(
-            Q(literal__icontains=query) |
-            Q(meaning__icontains=query) |
-            Q(kunyomi_readings__icontains=query) |
-            Q(onyomi_readings__icontains=query) |
-            Q(readings__icontains=query)
-        )
-        .order_by("level")[:limit]
-    )
+    qs = DictionaryEntry.objects.filter(
+        Q(literal__icontains=query) |
+        Q(meaning__icontains=query) |
+        Q(kunyomi_readings__icontains=query) |
+        Q(onyomi_readings__icontains=query) |
+        Q(readings__icontains=query)
+    ).order_by("level", "id")
 
-    # For each result, get/create the corresponding UDE
+    paginator = SearchPagination()
+    page = paginator.paginate_queryset(qs, request)
+
+    # Map results into UDEs (create if needed)
     udes = [
         UserDictionaryEntry.objects.get_or_create(user=request.user, entry=e)[0]
-        for e in entries
+        for e in page
     ]
 
     serializer = UserDictionaryEntrySerializer(udes, many=True)
-    return Response(serializer.data)
+    return paginator.get_paginated_response(serializer.data)
 
 
 @api_view(['GET'])
