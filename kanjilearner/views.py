@@ -104,6 +104,9 @@ def get_recent_mistakes(request):
     now = datetime.now(dt_timezone.utc)
     cutoff = now - timedelta(hours=24)
 
+    # Purge old mistakes beyond 24h so they don’t linger in DB
+    RecentMistake.objects.filter(user=request.user, timestamp__lt=cutoff).delete()
+
     recent_mistakes = (
         RecentMistake.objects
         .filter(user=request.user, timestamp__gte=cutoff)

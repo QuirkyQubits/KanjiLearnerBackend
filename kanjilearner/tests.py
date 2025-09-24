@@ -3,7 +3,7 @@ from django.test import TestCase
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from datetime import timedelta
-from kanjilearner.models import DictionaryEntry, UserDictionaryEntry, PlannedEntry
+from kanjilearner.models import DictionaryEntry, RecentMistake, UserDictionaryEntry, PlannedEntry
 from .utils import initialize_user_dictionary_entries  # adjust if in another module
 from kanjilearner.constants import SRSStage, SRS_INTERVALS, EntryType
 from django.urls import reverse
@@ -732,6 +732,66 @@ class ReviewRoundingTest(TestCase):
 
         self.assertEqual(self.ude.next_review_at.hour, expected_hour)
         self.assertEqual(self.ude.next_review_at.minute, 0)
+
+
+class RecentMistakesAPITest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="testuser", password="pw")
+        self.client.login(username="testuser", password="pw")
+
+        self.entry = DictionaryEntry.objects.create(
+            entry_type=EntryType.KANJI,
+            literal="山",
+            meaning="mountain",
+            level=1,
+        )
+
+    def url(self):
+        return reverse("get_recent_mistakes")
+
+    def test_old_mistakes_purged(self):
+        # First add a mistake normally
+        UserDictionaryEntry.record_recent_mistake(self.user, self.entry)
+        old_mistake = RecentMistake.objects.filter(user=self.user).latest("timestamp")
+
+        # Force it to be 25h old in the DB
+        RecentMistake.objects.filter(id=old_mistake.id).update(
+            timestamp=timezone.now() - timedelta(hours=25)
+        )
+
+        # Add a fresh mistake at current time
+        UserDictionaryEntry.record_recent_mistake(self.user, self.entry)
+
+        # Call API to trigger purge
+        resp = self.client.get(self.url())
+        data = resp.json()
+
+        # Should only return the fresh one
+        self.assertEqual(len(data), 1)
+
+        # And the DB should also only contain 1 record
+        remaining = RecentMistake.objects.filter(user=self.user)
+        self.assertEqual(remaining.count(), 1)
+
+    def test_max_50_retained(self):
+        # Insert 55 mistakes
+        for i in range(55):
+            UserDictionaryEntry.record_recent_mistake(self.user, self.entry)
+
+        resp = self.client.get(self.url())
+        data = resp.json()
+
+        # Only 50 should remain in response
+        self.assertEqual(len(data), 50)
+
+        # DB should also only have 50 records
+        remaining = RecentMistake.objects.filter(user=self.user)
+        self.assertEqual(remaining.count(), 50)
+
+        # The oldest ones should have been purged
+        oldest = remaining.order_by("timestamp").first()
+        newest = remaining.order_by("-timestamp").first()
+        self.assertTrue(oldest.timestamp <= newest.timestamp)
 
 
 
