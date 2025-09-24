@@ -1,8 +1,5 @@
 from typing import Type
 from django.db import models
-
-# Create your models here.
-
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.contrib.postgres.fields import ArrayField
@@ -14,8 +11,14 @@ from django.db.models import QuerySet
 from typing import Type
 from kanjilearner.constants import SRSStage, SRS_INTERVALS, EntryType
 
-
 User = get_user_model()
+
+
+def ceil_to_next_hour(dt):
+    """Round a datetime up to the next exact hour."""
+    if dt.minute == 0 and dt.second == 0 and dt.microsecond == 0:
+        return dt  # already aligned
+    return dt.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
 
 
 class DictionaryEntry(models.Model):
@@ -208,11 +211,14 @@ class UserDictionaryEntry(models.Model):
         if index < len(stage_order) - 1:
             self.srs_stage = stage_order[index + 1]
             self.last_reviewed_at = timezone.now()
-            self.next_review_at = (
-                timezone.now() + SRS_INTERVALS.get(self.srs_stage) if self.srs_stage != SRSStage.BURNED else None
-            )
-            self.save()
 
+            if self.srs_stage != SRSStage.BURNED:
+                raw_next = timezone.now() + SRS_INTERVALS[self.srs_stage]
+                self.next_review_at = ceil_to_next_hour(raw_next)
+            else:
+                self.next_review_at = None
+
+            self.save()
     
     def demote(self):
         """Demote item based on SRS rules when user gets it wrong."""
@@ -234,7 +240,10 @@ class UserDictionaryEntry(models.Model):
         new_stage = demotion_map.get(self.srs_stage, SRSStage.APPRENTICE_1)  # Safety fallback
         self.srs_stage = new_stage
         self.last_reviewed_at = timezone.now()
-        self.next_review_at = timezone.now() + SRS_INTERVALS[new_stage]
+
+        raw_next = timezone.now() + SRS_INTERVALS[new_stage]
+        self.next_review_at = ceil_to_next_hour(raw_next)
+
         self.save()
     
     

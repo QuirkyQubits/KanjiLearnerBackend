@@ -188,8 +188,10 @@ def result_failure(request):
 @permission_classes([IsAuthenticated])
 def get_review_forecast(request):
     """
-    Return upcoming reviews from now until 11:59 PM today,
-    bucketed by local hour (0-23) in the user's timezone.
+    Return upcoming reviews for the next 7 days,
+    bucketed by local date (YYYY-MM-DD) and hour (00-23).
+    Counts include a global cumulative total that rolls forward across all days.
+    Always includes all 7 days and 24 hours, even if count=0.
     """
     user_tz_str = request.query_params.get("tz")  # e.g. "America/Los_Angeles"
     if not user_tz_str:
@@ -203,42 +205,41 @@ def get_review_forecast(request):
     now_utc = dj_timezone.now()
     now_local = now_utc.astimezone(user_tz)
 
-    # Build local end of day
-    local_day_end = datetime(
-        year=now_local.year,
-        month=now_local.month,
-        day=now_local.day,
-        hour=23,
-        minute=59,
-        second=59,
-        tzinfo=user_tz
+    # Range: now → 7 days from now (local 23:59:59)
+    local_end = (now_local + timedelta(days=7)).replace(
+        hour=23, minute=59, second=59, microsecond=0
     )
-
     utc_start = now_local.astimezone(dt_timezone.utc)
-    utc_end = local_day_end.astimezone(dt_timezone.utc)
+    utc_end = local_end.astimezone(dt_timezone.utc)
 
-    # Get upcoming reviews between now and 11:59 PM local time
+    # Get reviews due in this 7-day window
     upcoming_reviews = (
         UserDictionaryEntry.objects
         .filter(user=request.user)
-        .exclude(srs_stage__in=[SRSStage.LOCKED, SRSStage.LESSON])
+        .exclude(srs_stage__in=[SRSStage.LOCKED, SRSStage.LESSON, SRSStage.BURNED])
         .filter(next_review_at__gt=utc_start, next_review_at__lte=utc_end)
         .values_list("next_review_at", flat=True)
     )
 
-    # Bucket by local hour
-    buckets = defaultdict(int)
+    # Bucket counts by (day, hour)
+    raw_buckets = defaultdict(lambda: defaultdict(int))
     for dt in upcoming_reviews:
-        local_hour = dt.astimezone(user_tz).hour
-        buckets[local_hour] += 1
+        local_dt = dt.astimezone(user_tz)
+        day_str = local_dt.strftime("%Y-%m-%d")
+        hour_str = f"{local_dt.hour:02d}"
+        raw_buckets[day_str][hour_str] += 1
 
-    # Build result with cumulative totals
+    # Build result: always 7 days × 24 hours
     result = {}
     cumulative = 0
-    for hour in sorted(buckets):
-        count = buckets[hour]
-        cumulative += count
-        result[str(hour)] = {"count": count, "cumulative": cumulative}
+    for offset in range(7):
+        day = (now_local + timedelta(days=offset)).date()
+        day_str = day.strftime("%Y-%m-%d")
+        result[day_str] = {}
+        for hour in [f"{h:02d}" for h in range(24)]:
+            count = raw_buckets.get(day_str, {}).get(hour, 0)
+            cumulative += count
+            result[day_str][hour] = {"count": count, "cumulative": cumulative}
 
     return Response(result)
 

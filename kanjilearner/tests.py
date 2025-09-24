@@ -519,3 +519,220 @@ class PlanAddAPITests(TestCase):
         self.assertFalse(PlannedEntry.objects.filter(user=self.user, entry=dependent_kanji).exists())
 
 
+class ReviewForecastAPITest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="testuser", password="password123")
+        self.client.login(username="testuser", password="password123")
+
+        self.entry = DictionaryEntry.objects.create(
+            entry_type=EntryType.KANJI,
+            literal="水",
+            meaning="water",
+            level=1,
+        )
+
+    def url(self, tz="UTC"):
+        return reverse("get_review_forecast") + f"?tz={tz}"
+
+    def make_ude(self, srs_stage=SRSStage.APPRENTICE_1, delta_hours=1):
+        """Helper to create a UserDictionaryEntry with a scheduled review in delta_hours."""
+        return UserDictionaryEntry.objects.create(
+            user=self.user,
+            entry=self.entry,
+            srs_stage=srs_stage,
+            next_review_at=timezone.now() + timedelta(hours=delta_hours),
+        )
+
+    def test_requires_timezone_param(self):
+        url = reverse("get_review_forecast")
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("Missing 'tz'", resp.json()["error"])
+
+    def test_empty_forecast(self):
+        resp = self.client.get(self.url())
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        # Should always contain 7 days
+        self.assertEqual(len(data.keys()), 7)
+        for day, hours in data.items():
+            # Each day has 24 hours
+            self.assertEqual(len(hours.keys()), 24)
+            # All counts should be 0
+            for hour in hours.values():
+                self.assertEqual(hour["count"], 0)
+
+    def test_single_review_in_next_hour(self):
+        self.make_ude(delta_hours=1)
+        resp = self.client.get(self.url())
+        data = resp.json()
+
+        # Still 7 days in response
+        self.assertEqual(len(data.keys()), 7)
+        # Sum across all days should equal 1
+        total = sum(hour["count"] for day in data.values() for hour in day.values())
+        self.assertEqual(total, 1)
+
+    def test_multiple_reviews_across_days(self):
+        # Day 1
+        self.make_ude(delta_hours=1)
+        self.make_ude(delta_hours=2)
+        # Day 2
+        self.make_ude(delta_hours=26)
+        self.make_ude(delta_hours=30)
+
+        resp = self.client.get(self.url())
+        data = resp.json()
+
+        self.assertEqual(len(data.keys()), 7)
+
+        # Day 1 counts
+        day1 = sorted(data.keys())[0]
+        counts_day1 = sum(h["count"] for h in data[day1].values())
+
+        # Day 2 counts
+        day2 = sorted(data.keys())[1]
+        counts_day2 = sum(h["count"] for h in data[day2].values())
+
+        # Check rolling cumulative (global, not reset)
+        last_cumulative_day1 = max(h["cumulative"] for h in data[day1].values())
+        first_cumulative_day2 = min(h["cumulative"] for h in data[day2].values())
+
+        self.assertEqual(last_cumulative_day1, counts_day1)
+        self.assertEqual(first_cumulative_day2, counts_day1 + data[day2]["00"]["count"])
+
+        total_counts = counts_day1 + counts_day2
+        last_cumulative = max(h["cumulative"] for h in data[day2].values())
+        self.assertEqual(last_cumulative, total_counts)
+
+    def test_excludes_locked_lesson_burned(self):
+        self.make_ude(srs_stage=SRSStage.LOCKED, delta_hours=1)
+        self.make_ude(srs_stage=SRSStage.LESSON, delta_hours=1)
+        self.make_ude(srs_stage=SRSStage.BURNED, delta_hours=1)
+
+        resp = self.client.get(self.url())
+        data = resp.json()
+
+        # Should still return 7 days × 24 hours
+        self.assertEqual(len(data.keys()), 7)
+        total_counts = sum(hour["count"] for day in data.values() for hour in day.values())
+        self.assertEqual(total_counts, 0)
+
+    def test_excludes_beyond_seven_days(self):
+        # Inside 7-day window → should appear
+        self.make_ude(delta_hours=24 * 6)  # ~6 days
+        # Outside 7-day window → should NOT appear
+        self.make_ude(delta_hours=24 * 8)  # ~8 days
+
+        resp = self.client.get(self.url())
+        data = resp.json()
+
+        self.assertEqual(len(data.keys()), 7)
+        total_counts = sum(hour["count"] for day in data.values() for hour in day.values())
+        self.assertEqual(total_counts, 1)
+    
+    def test_each_day_has_24_hours(self):
+        # Add one review today
+        self.make_ude(delta_hours=1)
+
+        resp = self.client.get(self.url())
+        data = resp.json()
+
+        # Ensure 7 days are always returned
+        self.assertEqual(len(data.keys()), 7)
+
+        for day, hours in data.items():
+            # Each day must have exactly 24 keys
+            self.assertEqual(len(hours.keys()), 24, f"{day} does not have 24 hours")
+
+            # Hours must be strings "00" .. "23"
+            expected_keys = {f"{h:02d}" for h in range(24)}
+            self.assertEqual(set(hours.keys()), expected_keys)
+
+            # Each value must include both "count" and "cumulative"
+            for hour_key, hour_val in hours.items():
+                self.assertIn("count", hour_val)
+                self.assertIn("cumulative", hour_val)
+
+
+class ReviewRoundingTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="testuser", password="password123")
+
+        self.entry = DictionaryEntry.objects.create(
+            entry_type=EntryType.KANJI,
+            literal="火",
+            meaning="fire",
+            level=1,
+        )
+        self.ude = UserDictionaryEntry.objects.create(
+            user=self.user,
+            entry=self.entry,
+            srs_stage=SRSStage.APPRENTICE_1,
+            next_review_at=timezone.now(),
+        )
+
+    def test_promote_rounds_up(self):
+        # Pretend it's 08:17
+        now = timezone.now().replace(hour=8, minute=17, second=0, microsecond=0)
+        interval = SRS_INTERVALS[SRSStage.APPRENTICE_2]
+        expected_raw = now + interval
+        # round up
+        if expected_raw.minute == 0:
+            expected_hour = expected_raw.hour
+        else:
+            expected_hour = (expected_raw + timedelta(hours=1)).hour
+
+        orig_now = timezone.now
+        timezone.now = lambda: now
+        try:
+            self.ude.srs_stage = SRSStage.APPRENTICE_1
+            self.ude.promote()
+        finally:
+            timezone.now = orig_now
+
+        self.assertEqual(self.ude.next_review_at.hour, expected_hour)
+        self.assertEqual(self.ude.next_review_at.minute, 0)
+
+    def test_promote_already_on_hour(self):
+        # Pretend it's exactly 14:00
+        now = timezone.now().replace(hour=14, minute=0, second=0, microsecond=0)
+        interval = SRS_INTERVALS[SRSStage.APPRENTICE_2]
+        expected_raw = now + interval
+        expected_hour = expected_raw.hour  # already aligned
+
+        orig_now = timezone.now
+        timezone.now = lambda: now
+        try:
+            self.ude.srs_stage = SRSStage.APPRENTICE_1
+            self.ude.promote()
+        finally:
+            timezone.now = orig_now
+
+        self.assertEqual(self.ude.next_review_at.hour, expected_hour)
+        self.assertEqual(self.ude.next_review_at.minute, 0)
+
+    def test_demote_rounds_up(self):
+        # Pretend it's 09:45
+        now = timezone.now().replace(hour=9, minute=45, second=0, microsecond=0)
+        interval = SRS_INTERVALS[SRSStage.APPRENTICE_4]  # GURU_1 demotes to APPRENTICE_4
+        expected_raw = now + interval
+        if expected_raw.minute == 0:
+            expected_hour = expected_raw.hour
+        else:
+            expected_hour = (expected_raw + timedelta(hours=1)).hour
+
+        orig_now = timezone.now
+        timezone.now = lambda: now
+        try:
+            self.ude.srs_stage = SRSStage.GURU_1
+            self.ude.demote()
+        finally:
+            timezone.now = orig_now
+
+        self.assertEqual(self.ude.next_review_at.hour, expected_hour)
+        self.assertEqual(self.ude.next_review_at.minute, 0)
+
+
+
+
