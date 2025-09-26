@@ -148,7 +148,7 @@ class DictionarySearchTests(TestCase):
             entry_type=EntryType.VOCAB,
             literal="雨",
             meaning="rain",
-            readings=["あめ"],
+            reading=["あめ"],
             level=5,
         )
         self.entry_kanji = DictionaryEntry.objects.create(
@@ -217,7 +217,7 @@ class EntryDetailViewTests(TestCase):
             meaning="scenery",
             kunyomi_readings=["けい"],
             onyomi_readings=[],
-            readings=[],
+            reading=[],
             entry_type=EntryType.KANJI,
             level=1,
         )

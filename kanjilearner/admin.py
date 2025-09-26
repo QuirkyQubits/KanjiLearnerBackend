@@ -52,9 +52,9 @@ class DictionaryEntryAdmin(admin.ModelAdmin):
     form = DictionaryEntryForm
     readonly_fields = ['id']
     list_display = ("literal", "entry_type", "meaning", "level")
-    search_fields = ("literal", "meaning", "readings")
+    search_fields = ("literal", "meaning", "reading")
     list_filter = ("level", "entry_type")
-    filter_horizontal = ('constituents',)
+    filter_horizontal = ('constituents', 'visually_similar', 'used_in')
 
     def get_fieldsets(self, request, obj=None):
         # Base fields always shown
@@ -84,10 +84,56 @@ class DictionaryEntryAdmin(admin.ModelAdmin):
         mnemonic_fields = ['meaning_mnemonic']
         if obj and obj.entry_type in [EntryType.KANJI, EntryType.VOCAB]:
             mnemonic_fields.append('reading_mnemonic')
-
         fieldsets.append(("Mnemonics", {"fields": mnemonic_fields}))
 
+        # Similarity
+        fieldsets.append(("Similarity", {"fields": ['visually_similar']}))
+
+        # UsedIn only for radicals + kanji
+        if obj and obj.entry_type in [EntryType.RADICAL, EntryType.KANJI]:
+            fieldsets.append(("Usage", {"fields": ['used_in']}))
+
+        # Pitch graphs only for vocab
+        if obj and obj.entry_type == EntryType.VOCAB:
+            fieldsets.append(("Pitch", {"fields": ['pitch_graphs']}))
+
         return fieldsets
+
+
+    def formfield_for_manytomany(self, db_field, request, **kwargs):
+        """
+        Restrict the choices shown in M2M fields based on entry_type.
+        """
+        obj_id = request.resolver_match.kwargs.get("object_id")
+        obj = None
+        if obj_id:
+            try:
+                obj = DictionaryEntry.objects.get(pk=obj_id)
+            except DictionaryEntry.DoesNotExist:
+                pass
+
+        if db_field.name == "constituents" and obj:
+            if obj.entry_type == EntryType.KANJI:
+                kwargs["queryset"] = DictionaryEntry.objects.filter(entry_type=EntryType.RADICAL)
+            elif obj.entry_type == EntryType.VOCAB:
+                kwargs["queryset"] = DictionaryEntry.objects.filter(entry_type=EntryType.KANJI)
+
+        if db_field.name == "visually_similar" and obj:
+            if obj.entry_type == EntryType.RADICAL:
+                kwargs["queryset"] = DictionaryEntry.objects.filter(entry_type=EntryType.RADICAL)
+            elif obj.entry_type == EntryType.KANJI:
+                kwargs["queryset"] = DictionaryEntry.objects.filter(entry_type=EntryType.KANJI)
+            elif obj.entry_type == EntryType.VOCAB:
+                kwargs["queryset"] = DictionaryEntry.objects.filter(entry_type=EntryType.VOCAB)
+
+        if db_field.name == "used_in" and obj:
+            if obj.entry_type == EntryType.RADICAL:
+                kwargs["queryset"] = DictionaryEntry.objects.filter(entry_type=EntryType.KANJI)
+            elif obj.entry_type == EntryType.KANJI:
+                kwargs["queryset"] = DictionaryEntry.objects.filter(entry_type=EntryType.VOCAB)
+
+        return super().formfield_for_manytomany(db_field, request, **kwargs)
+
 
 @admin.register(UserDictionaryEntry)
 class UserDictionaryEntryAdmin(admin.ModelAdmin):

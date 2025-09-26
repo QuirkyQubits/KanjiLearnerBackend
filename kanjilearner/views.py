@@ -263,7 +263,7 @@ def search(request):
         Q(meaning__icontains=query) |
         Q(kunyomi_readings__icontains=query) |
         Q(onyomi_readings__icontains=query) |
-        Q(readings__icontains=query)
+        Q(reading__icontains=query)
     ).order_by("level", "id")
 
     paginator = SearchPagination()

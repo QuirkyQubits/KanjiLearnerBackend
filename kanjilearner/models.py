@@ -38,10 +38,9 @@ class DictionaryEntry(models.Model):
     onyomi_readings = ArrayField(models.CharField(max_length=50), blank=True, default=list)
 
     # Only applies to vocab entries
-    readings = ArrayField(
-        models.CharField(max_length=50),
+    reading = models.CharField(
+        max_length=50,
         blank=True,
-        default=list,
         help_text="Kana readings for vocab (e.g. たべる, みず)"
     )
 
@@ -53,7 +52,12 @@ class DictionaryEntry(models.Model):
     level = models.PositiveIntegerField()
 
     # Dependencies and usage
-    constituents = models.ManyToManyField("self", symmetrical=False, blank=True, related_name="used_in")
+    constituents = models.ManyToManyField(
+        "self",
+        symmetrical=False,
+        blank=True,
+        related_name="+"
+    )
 
     # Optional audio clip (for vocab entries)
     audio = models.FileField(upload_to="audio/", blank=True, null=True)
@@ -91,6 +95,34 @@ class DictionaryEntry(models.Model):
         help_text="Multiple parts of speech allowed (e.g. noun, suru_noun)"
     )
 
+    visually_similar = models.ManyToManyField(
+        "self",
+        blank=True,
+        symmetrical=False,
+        help_text="Visually similar kanji, vocab, or radicals (not automatically reciprocal)"
+    )
+
+    used_in = models.ManyToManyField(
+        "self",
+        blank=True,
+        symmetrical=False,
+        related_name="+",
+        help_text="For radicals → kanji they appear in; for kanji → vocab they appear in"
+    )
+
+    pitch_graphs = ArrayField(
+        ArrayField(
+            models.CharField(
+                max_length=3,
+                choices=[("H", "High"), ("L", "Low"), ("(L)", "DropLow")],
+            ),
+            size=None,
+        ),
+        blank=True,
+        default=list,
+        help_text="For vocab only: pitch accent graphs (one per reading if needed)."
+    )
+
     class Meta:
         ordering = ["level"]
         
@@ -99,16 +131,13 @@ class DictionaryEntry(models.Model):
                 check=models.Q(entry_type__in=[e.value for e in EntryType]),
                 name="valid_entry_type_only"
             ),
-
-            models.UniqueConstraint(
-                fields=["literal", "entry_type"],
-                name="unique_literal_entrytype",
-                condition=~models.Q(literal="")  # allow duplicates if literal is empty
-            ),
         ]
 
     def __str__(self):
-        return f"{self.literal} ({self.get_entry_type_display()})"
+        if self.entry_type == EntryType.VOCAB and self.reading:
+            return f"{self.literal} [{self.meaning}] /{self.reading}/ (Vocab)"
+        
+        return f"{self.literal} [{self.meaning}] ({self.get_entry_type_display()})"
 
 
 
