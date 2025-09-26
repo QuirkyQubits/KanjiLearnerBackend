@@ -4,6 +4,8 @@ from kanjilearner.models import DictionaryEntry, PlannedEntry, UserDictionaryEnt
 
 class DictionaryEntrySerializer(serializers.ModelSerializer):
     constituents = serializers.SerializerMethodField()
+    visually_similar = serializers.SerializerMethodField()
+    used_in = serializers.SerializerMethodField()
     srs_stage = serializers.SerializerMethodField()
     next_review_at = serializers.SerializerMethodField()
     unlocked = serializers.SerializerMethodField()
@@ -42,6 +44,28 @@ class DictionaryEntrySerializer(serializers.ModelSerializer):
                 "entry_type": c.entry_type,
             }
             for c in obj.constituents.all()
+        ]
+
+    def get_visually_similar(self, obj):
+        return [
+            {
+                "id": v.id,
+                "literal": v.literal,
+                "meaning": v.meaning,
+                "entry_type": v.entry_type,
+            }
+            for v in obj.visually_similar.all()
+        ]
+
+    def get_used_in(self, obj):
+        return [
+            {
+                "id": u.id,
+                "literal": u.literal,
+                "meaning": u.meaning,
+                "entry_type": u.entry_type,
+            }
+            for u in obj.used_in.all()
         ]
 
     def get_user_entry(self, obj):
