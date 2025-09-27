@@ -166,15 +166,6 @@ else:
 
 CORS_ALLOW_CREDENTIALS = True
 
-if ENV == "prod":
-    CSRF_TRUSTED_ORIGINS = [
-        "https://kanjilearner-frontend.vercel.app",
-    ]
-else:
-    CSRF_TRUSTED_ORIGINS = [
-        "http://localhost:5173",
-    ]
-
 CSRF_COOKIE_HTTPONLY = True
 
 if ENV == "prod":
