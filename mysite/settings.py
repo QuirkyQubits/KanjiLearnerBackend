@@ -166,8 +166,6 @@ else:
 
 CORS_ALLOW_CREDENTIALS = True
 
-CSRF_COOKIE_HTTPONLY = True
-
 if ENV == "prod":
     SESSION_COOKIE_SAMESITE = "None"
     CSRF_COOKIE_SAMESITE = "None"
