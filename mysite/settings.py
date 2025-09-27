@@ -151,10 +151,16 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # CORS (adjust port if needed)
 if ENV == "prod":
     CORS_ALLOWED_ORIGINS = [
-        "https://kanjilearner-frontend.vercel.app",
+        "https://kanji-learner-frontend.vercel.app",
+    ]
+    CSRF_TRUSTED_ORIGINS = [
+        "https://kanji-learner-frontend.vercel.app",
     ]
 else:
     CORS_ALLOWED_ORIGINS = [
+        "http://localhost:5173",
+    ]
+    CSRF_TRUSTED_ORIGINS = [
         "http://localhost:5173",
     ]
 
