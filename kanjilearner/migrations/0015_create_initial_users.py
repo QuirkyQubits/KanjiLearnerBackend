@@ -31,7 +31,7 @@ def remove_initial_users(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('kanjilearner', '0001_initial'),
+        ('kanjilearner', '0014_remove_dictionaryentry_unique_literal_entrytype_and_more'),
     ]
 
     operations = [
