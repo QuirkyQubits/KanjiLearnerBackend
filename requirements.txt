@@ -10,3 +10,4 @@ typing_extensions==4.14.1
 tzdata==2024.2
 gunicorn
 dj-database-url
+whitenoise
