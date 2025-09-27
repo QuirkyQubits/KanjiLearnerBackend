@@ -12,22 +12,26 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 
 from pathlib import Path
 import os
+import dj_database_url
+
+ENV = os.getenv("DJANGO_ENV", "dev")
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-092jvo2&(+273@2hp)u6%a5wx5nl94it$u0t2n#5n*6iv51$!y'
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "insecure-dev-key")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = (ENV != "prod")
 
-ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
-
+if ENV == "prod":
+    ALLOWED_HOSTS = ["kanjilearner-backend.onrender.com", ".onrender.com"]
+else:
+    ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
 
 # Application definition
 
@@ -45,8 +49,9 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -79,16 +84,25 @@ WSGI_APPLICATION = 'mysite.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'kanjiapp',
-        'USER': 'postgres',
-        'PASSWORD': 'password',
-        'HOST': 'localhost',
-        'PORT': '5432',
+if ENV == "prod":
+    DATABASES = {
+        "default": dj_database_url.config(
+            default=os.getenv("DATABASE_URL"),
+            conn_max_age=600,
+            ssl_require=True
+        )
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": "kanjiapp",
+            "USER": "postgres",
+            "PASSWORD": "password",
+            "HOST": "localhost",
+            "PORT": "5432",
+        }
+    }
 
 
 # Password validation
@@ -125,7 +139,9 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.1/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
+
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
@@ -133,15 +149,27 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # CORS (adjust port if needed)
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-]
-CORS_ALLOW_CREDENTIALS = True
-CSRF_TRUSTED_ORIGINS = ["http://localhost:5173"]
-CSRF_COOKIE_HTTPONLY = False  # frontend needs to read this cookie
+if ENV == "prod":
+    CORS_ALLOWED_ORIGINS = [
+        "https://kanjilearner-frontend.vercel.app",
+    ]
+else:
+    CORS_ALLOWED_ORIGINS = [
+        "http://localhost:5173",
+    ]
 
-# Detect if we're in production
-ENV = os.getenv("DJANGO_ENV", "dev")
+CORS_ALLOW_CREDENTIALS = True
+
+if ENV == "prod":
+    CSRF_TRUSTED_ORIGINS = [
+        "https://kanjilearner-frontend.vercel.app",
+    ]
+else:
+    CSRF_TRUSTED_ORIGINS = [
+        "http://localhost:5173",
+    ]
+
+CSRF_COOKIE_HTTPONLY = True
 
 if ENV == "prod":
     SESSION_COOKIE_SAMESITE = "None"
@@ -154,3 +182,11 @@ else:
     CSRF_COOKIE_SAMESITE = "Lax"
     SESSION_COOKIE_SECURE = False
     CSRF_COOKIE_SECURE = False
+
+# security middlware settings suggested by ChatGPT
+if ENV == "prod":
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_HSTS_SECONDS = 31536000  # one year
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
