@@ -15,12 +15,16 @@ from zoneinfo import ZoneInfo
 from django.contrib.auth import authenticate, login
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.db.models import Q
+from django.middleware.csrf import get_token
+from django.http import JsonResponse
 
 
 @api_view(['GET'])
 @ensure_csrf_cookie
 def get_csrf_token(request):
-    return Response({"message": "CSRF cookie set"})
+    # get_token() both *sets* the CSRF cookie and returns the value
+    token = get_token(request)
+    return JsonResponse({"csrfToken": token})
 
 
 @api_view(['GET'])
