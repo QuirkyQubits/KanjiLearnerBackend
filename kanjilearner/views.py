@@ -12,19 +12,17 @@ from kanjilearner.models import DictionaryEntry, PlannedEntry, RecentMistake, Us
 from kanjilearner.serializers import DictionaryEntrySerializer, UserDictionaryEntrySerializer
 from kanjilearner.services.plan import plan_entry
 from zoneinfo import ZoneInfo
-from django.contrib.auth import authenticate, login
+from django.contrib.auth import authenticate, login, logout
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.db.models import Q
 from django.middleware.csrf import get_token
-from django.http import JsonResponse
 
 
 @api_view(['GET'])
 @ensure_csrf_cookie
 def get_csrf_token(request):
-    # get_token() both *sets* the CSRF cookie and returns the value
-    token = get_token(request)
-    return JsonResponse({"csrfToken": token})
+    token = get_token(request)  # sets the CSRF cookie and returns the value
+    return Response({"csrfToken": token})
 
 
 @api_view(['GET'])
@@ -49,6 +47,13 @@ def login_view(request):
         return Response({"message": "Logged in"})
     else:
         return Response({"error": "Invalid credentials"}, status=400)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def logout_view(request):
+    logout(request)
+    return Response({"message": "Logged out"})
 
 
 @api_view(['GET'])

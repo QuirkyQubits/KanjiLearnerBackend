@@ -16,4 +16,5 @@ urlpatterns = [
     path("api/planned/", views.get_planned, name="get_planned"),
     path("api/plan_add/", views.plan_add, name="plan_add"),
     path("api/whoami/", views.whoami, name="whoami"),
+    path("api/logout/", views.logout_view, name="api_logout"),
 ]
