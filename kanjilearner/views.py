@@ -5,17 +5,26 @@ from django.utils import timezone as dj_timezone
 from kanjilearner.constants import SRSStage
 from kanjilearner.pagination import SearchPagination
 from kanjilearner.services.plan import process_planned_entries
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
+from rest_framework.throttling import AnonRateThrottle
 from kanjilearner.models import DictionaryEntry, PlannedEntry, RecentMistake, UserDictionaryEntry
-from kanjilearner.serializers import DictionaryEntrySerializer, UserDictionaryEntrySerializer
+from kanjilearner.serializers import UserDictionaryEntrySerializer
 from kanjilearner.services.plan import plan_entry
 from zoneinfo import ZoneInfo
 from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth.tokens import default_token_generator
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.db.models import Q
 from django.middleware.csrf import get_token
+from django.core.mail import send_mail
+from django.contrib.auth.models import User
+from django.conf import settings
+
+
+class SignupRateThrottle(AnonRateThrottle):
+    rate = "5/hour"  # limit to 5 attempts per IP per hour
 
 
 @api_view(['GET'])
@@ -54,6 +63,109 @@ def login_view(request):
 def logout_view(request):
     logout(request)
     return Response({"message": "Logged out"})
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+@throttle_classes([SignupRateThrottle])
+def register_view(request):
+    username = request.data.get("username")
+    password = request.data.get("password")
+    email = request.data.get("email")
+
+    if not username or not password or not email:
+        return Response({"error": "Username, password, and email required"}, status=400)
+
+    if User.objects.filter(username=username).exists():
+        return Response({"error": "Username already taken"}, status=400)
+
+    if User.objects.filter(email=email).exists():
+        return Response({"error": "Email already in use"}, status=400)
+
+    # Create inactive user
+    user = User.objects.create_user(username=username, password=password, email=email)
+    user.is_active = False
+    user.save()
+
+    # Initialize all level=0 entries as burned
+    level0_entries = DictionaryEntry.objects.filter(level=0)
+    UserDictionaryEntry.objects.bulk_create([
+        UserDictionaryEntry(
+            user=user,
+            entry=entry,
+            srs_stage=SRSStage.BURNED,
+            unlocked_at=dj_timezone.now(),
+            next_review_at=None,
+            last_reviewed_at=dj_timezone.now(),
+        )
+        for entry in level0_entries
+    ], ignore_conflicts=True)
+
+    # Generate a verification token
+    token = default_token_generator.make_token(user)
+    verification_link = f"{settings.FRONTEND_URL}/verify-email/{user.pk}/{token}/"
+
+    # Send email (using Django’s email backend)
+    send_mail(
+        "Verify your KanjiLearner account",
+        f"Click the link to verify your account: {verification_link}",
+        settings.DEFAULT_FROM_EMAIL,
+        [email],
+        fail_silently=False,
+    )
+
+    return Response({"message": "User registered. Please check your email to verify your account."})
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def verify_email(request, uid, token):
+    try:
+        user = User.objects.get(pk=uid)
+    except User.DoesNotExist:
+        return Response({"error": "Invalid user"}, status=400)
+
+    if user.is_active:
+        return Response(
+            {"error": "This verification link has already been used. Please log in instead."},
+            status=400,
+        )
+
+    if default_token_generator.check_token(user, token):
+        user.is_active = True
+        user.save()
+
+        #  Ensure level 0 entries are initialized as burned
+        level0_entries = DictionaryEntry.objects.filter(level=0)
+        for entry in level0_entries:
+            # See if one already exists for this (user, entry)
+            exists = UserDictionaryEntry.objects.filter(user=user, entry=entry).exists()
+            if not exists:
+                UserDictionaryEntry.objects.create(
+                    user=user,
+                    entry=entry,
+                    srs_stage=SRSStage.BURNED,
+                    unlocked_at=dj_timezone.now(),
+                    last_reviewed_at=dj_timezone.now(),
+                )
+
+        login(request, user)  # auto-login after verification
+        return Response({"message": "Email verified, account activated"})
+    else:
+        return Response({"error": "Invalid or expired verification link"}, status=400)
+
+
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def delete_account(request):
+    """
+    Delete the authenticated user and cascade delete all related data.
+    """
+    user = request.user
+    username = user.username
+    user.delete()  # Cascade deletes UserDictionaryEntry, RecentMistake, PlannedEntry, etc.
+
+    return Response({"message": f"Account '{username}' and all related data deleted."})
 
 
 @api_view(['GET'])

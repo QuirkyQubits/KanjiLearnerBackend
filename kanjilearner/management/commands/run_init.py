@@ -6,6 +6,8 @@ from kanjilearner.constants import EntryType, SRSStage
 from kanjilearner.models import DictionaryEntry
 from django.contrib.auth.models import User
 from django.db.models import Count
+from django.core.mail import send_mail
+from django.conf import settings
 
 
 User = get_user_model()
@@ -76,6 +78,16 @@ def check_dupes():
         print(f"Literal: {d['literal'].encode('utf-8', errors='replace')}, Count: {d['count']}")
 
 
+def send_test_email():
+    # Test email
+    send_mail(
+        "Test email from run_init",
+        "Hello from Django management command.",
+        settings.DEFAULT_FROM_EMAIL,
+        ["someone@example.com"],
+    )
+
+
 class Command(BaseCommand):
     help = "Initialize dictionary entries for the admin user"
 
@@ -83,10 +95,13 @@ class Command(BaseCommand):
         # code goes here to run
         # run it like $ python manage.py run_init
 
-        user = User.objects.get(username="testuser")
-        
-        # initialize_user_dictionary_entries(user)
+        username = "testuser2"
 
-        # check_dupes()
+        try:
+            user = User.objects.get(username=username)
+            user.delete()
+            self.stdout.write(self.style.SUCCESS(f"Deleted user '{username}' and all related records."))
+        except User.DoesNotExist:
+            self.stdout.write(self.style.WARNING(f"User '{username}' does not exist."))
 
         self.stdout.write(self.style.SUCCESS("Initialization complete."))

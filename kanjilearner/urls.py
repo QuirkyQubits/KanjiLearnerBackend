@@ -17,4 +17,7 @@ urlpatterns = [
     path("api/plan_add/", views.plan_add, name="plan_add"),
     path("api/whoami/", views.whoami, name="whoami"),
     path("api/logout/", views.logout_view, name="api_logout"),
+    path("api/register/", views.register_view, name="api_register"),
+    path("api/verify-email/<int:uid>/<str:token>/", views.verify_email, name="api_verify_email"),
+    path("api/delete_account/", views.delete_account, name="delete_account"),
 ]

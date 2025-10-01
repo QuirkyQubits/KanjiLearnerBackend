@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 from pathlib import Path
 import os
 import dj_database_url
+from urllib.parse import urlparse
 
 ENV = os.getenv("DJANGO_ENV", "dev")
 
@@ -28,10 +29,43 @@ SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "insecure-dev-key")
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = (ENV != "prod")
 
+# URLs and email
+FRONTEND_URL = (
+    "https://kanji-learner-frontend.vercel.app"
+    if ENV == "prod"
+    else "http://localhost:5173"
+)
+
+BACKEND_URL = (
+    "https://kanjilearner-backend.onrender.com"
+    if ENV == "prod"
+    else "http://localhost:8000"
+)
+
+DEFAULT_FROM_EMAIL = (
+    os.getenv("DEFAULT_FROM_EMAIL", "youraddress@gmail.com")
+    if ENV == "prod"
+    else "noreply@kanjilearner.local"
+)
+
 if ENV == "prod":
-    ALLOWED_HOSTS = ["kanjilearner-backend.onrender.com", ".onrender.com"]
+    EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+    EMAIL_HOST = "smtp.gmail.com"
+    EMAIL_PORT = 587
+    EMAIL_USE_TLS = True
+    EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
+    EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
 else:
-    ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
+    # In development, just print emails to the console
+    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+
+ALLOWED_HOSTS = (
+    ["localhost", "127.0.0.1", ".onrender.com"]
+    if ENV != "prod"
+    else [urlparse(BACKEND_URL).hostname, ".onrender.com"]
+)
+
+PASSWORD_RESET_TIMEOUT = 60 * 60  # seconds
 
 # Application definition
 
@@ -148,21 +182,9 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# CORS (adjust port if needed)
-if ENV == "prod":
-    CORS_ALLOWED_ORIGINS = [
-        "https://kanji-learner-frontend.vercel.app",
-    ]
-    CSRF_TRUSTED_ORIGINS = [
-        "https://kanji-learner-frontend.vercel.app",
-    ]
-else:
-    CORS_ALLOWED_ORIGINS = [
-        "http://localhost:5173",
-    ]
-    CSRF_TRUSTED_ORIGINS = [
-        "http://localhost:5173",
-    ]
+# CORS / CSRF
+CORS_ALLOWED_ORIGINS = [FRONTEND_URL]
+CSRF_TRUSTED_ORIGINS = [FRONTEND_URL]
 
 CORS_ALLOW_CREDENTIALS = True
 
@@ -178,7 +200,7 @@ else:
     SESSION_COOKIE_SECURE = False
     CSRF_COOKIE_SECURE = False
 
-# security middlware settings suggested by ChatGPT
+# security middleware settings
 if ENV == "prod":
     SECURE_BROWSER_XSS_FILTER = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
