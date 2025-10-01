@@ -204,7 +204,6 @@ class UserDictionaryEntry(models.Model):
 )
 
     def unlock(self):
-        print(f"[DEBUG] unlock() called for {self.entry.literal} (user={self.user.username})")
         if not self.is_unlocked:
             self.unlocked_at = timezone.now()
             self.srs_stage = SRSStage.LESSON

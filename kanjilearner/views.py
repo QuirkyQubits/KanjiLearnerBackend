@@ -87,20 +87,6 @@ def register_view(request):
     user.is_active = False
     user.save()
 
-    # Initialize all level=0 entries as burned
-    level0_entries = DictionaryEntry.objects.filter(level=0)
-    UserDictionaryEntry.objects.bulk_create([
-        UserDictionaryEntry(
-            user=user,
-            entry=entry,
-            srs_stage=SRSStage.BURNED,
-            unlocked_at=dj_timezone.now(),
-            next_review_at=None,
-            last_reviewed_at=dj_timezone.now(),
-        )
-        for entry in level0_entries
-    ], ignore_conflicts=True)
-
     # Generate a verification token
     token = default_token_generator.make_token(user)
     verification_link = f"{settings.FRONTEND_URL}/verify-email/{user.pk}/{token}/"
@@ -134,20 +120,6 @@ def verify_email(request, uid, token):
     if default_token_generator.check_token(user, token):
         user.is_active = True
         user.save()
-
-        #  Ensure level 0 entries are initialized as burned
-        level0_entries = DictionaryEntry.objects.filter(level=0)
-        for entry in level0_entries:
-            # See if one already exists for this (user, entry)
-            exists = UserDictionaryEntry.objects.filter(user=user, entry=entry).exists()
-            if not exists:
-                UserDictionaryEntry.objects.create(
-                    user=user,
-                    entry=entry,
-                    srs_stage=SRSStage.BURNED,
-                    unlocked_at=dj_timezone.now(),
-                    last_reviewed_at=dj_timezone.now(),
-                )
 
         login(request, user)  # auto-login after verification
         return Response({"message": "Email verified, account activated"})

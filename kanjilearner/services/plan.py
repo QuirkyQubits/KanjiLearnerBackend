@@ -14,7 +14,6 @@ def plan_entry(user, entry: DictionaryEntry):
     """
     Recursively add entry to lessons or plan queue.
     """
-    print(f"[DEBUG] plan_entry() called for {entry.literal} (user={user.username})")
 
     try:
         ude = UserDictionaryEntry.objects.get(user=user, entry=entry)
