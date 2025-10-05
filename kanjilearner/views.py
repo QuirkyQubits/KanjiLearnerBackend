@@ -237,6 +237,8 @@ def result_success(request):
     except (DictionaryEntry.DoesNotExist, UserDictionaryEntry.DoesNotExist):
         return Response({"error": "Entry not found or not unlocked."}, status=404)
 
+    RecentMistake.clear_for_entry(request.user, entry)
+
     user_entry.promote()
 
     process_planned_entries(request.user)

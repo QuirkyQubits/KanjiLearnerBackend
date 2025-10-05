@@ -146,6 +146,10 @@ class RecentMistake(models.Model):
     entry = models.ForeignKey(DictionaryEntry, on_delete=models.CASCADE)
     timestamp = models.DateTimeField(auto_now_add=True)
 
+    @classmethod
+    def clear_for_entry(cls, user, entry):
+        cls.objects.filter(user=user, entry=entry).delete()
+
     class Meta:
         indexes = [
             models.Index(fields=['user', 'timestamp']),

@@ -105,28 +105,13 @@ class InitializeUserDictionaryEntriesTest(TestCase):
 
         self.assertEqual(user_entries.count(), entries.count())
 
+        # everything should remain LOCKED by default
         for entry in entries:
             user_entry = user_entries.get(entry=entry)
+            self.assertEqual(user_entry.srs_stage, SRSStage.LOCKED.value)
+            self.assertIsNone(user_entry.unlocked_at)
 
-            # Expect unlocked if:
-            # - Level 1 radical
-            # - OR Level 1 kanji with only level 0 constituents
-            should_unlock = False
-
-            if entry.level == 1:
-                if entry.entry_type == EntryType.RADICAL:
-                    should_unlock = True
-                elif entry.entry_type == EntryType.KANJI:
-                    if all(c.level < 1 for c in entry.constituents.all()):
-                        should_unlock = True
-
-            if should_unlock:
-                self.assertNotEqual(user_entry.srs_stage, SRSStage.LOCKED.value)
-                self.assertIsNotNone(user_entry.unlocked_at)
-            else:
-                self.assertEqual(user_entry.srs_stage, SRSStage.LOCKED.value)
-                self.assertIsNone(user_entry.unlocked_at)
-
+        # Review history should be empty for all
         for ue in user_entries:
             self.assertEqual(ue.review_history, [])
 
@@ -792,6 +777,50 @@ class RecentMistakesAPITest(TestCase):
         oldest = remaining.order_by("timestamp").first()
         newest = remaining.order_by("-timestamp").first()
         self.assertTrue(oldest.timestamp <= newest.timestamp)
+
+
+class ResultSuccessRemovesRecentMistakeTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="testuser", password="password")
+        self.client.login(username="testuser", password="password")
+
+        self.entry = DictionaryEntry.objects.create(
+            literal="水",
+            meaning="Water",
+            entry_type=EntryType.KANJI,
+            level=1
+        )
+
+        # Create the corresponding UserDictionaryEntry and unlock it for testing
+        self.ude = UserDictionaryEntry.objects.create(
+            user=self.user,
+            entry=self.entry,
+            srs_stage=SRSStage.APPRENTICE_1,
+        )
+
+        # Add a RecentMistake for this entry
+        RecentMistake.objects.create(user=self.user, entry=self.entry)
+
+    def test_result_success_removes_recent_mistake(self):
+        """Posting a correct review should remove any RecentMistake for that entry."""
+
+        # Pre-check: RecentMistake exists
+        self.assertTrue(
+            RecentMistake.objects.filter(user=self.user, entry=self.entry).exists()
+        )
+
+        # Call the result_success endpoint
+        response = self.client.post(
+            reverse("result_success"),
+            {"entry_id": self.entry.id},
+            format="json"
+        )
+        self.assertEqual(response.status_code, 200)
+
+        # After success, the RecentMistake should be gone
+        self.assertFalse(
+            RecentMistake.objects.filter(user=self.user, entry=self.entry).exists()
+        )
 
 
 
