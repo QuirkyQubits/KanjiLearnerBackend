@@ -2,7 +2,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from datetime import timezone as dt_timezone
 from django.utils import timezone as dj_timezone
-from kanjilearner.constants import SRSStage
+from kanjilearner.constants import EntryType, SRSStage
 from kanjilearner.pagination import SearchPagination
 from kanjilearner.services.plan import process_planned_entries
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
@@ -414,3 +414,68 @@ def get_planned(request):
 
     serializer = UserDictionaryEntrySerializer(udes, many=True)
     return Response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_item_spread(request):
+    """
+    Return counts of user items per SRS stage category:
+    apprentice, guru, master, enlightened, burned.
+    Each category includes breakdowns for radicals, kanji, and vocab.
+    Example:
+        {
+          "apprentice": {"radicals": 4, "kanji": 12, "vocab": 51},
+          "guru": {"radicals": 18, "kanji": 80, "vocab": 291},
+          "master": {"radicals": 13, "kanji": 101, "vocab": 414},
+          "enlightened": {"radicals": 82, "kanji": 358, "vocab": 1285},
+          "burned": {"radicals": 273, "kanji": 477, "vocab": 1448}
+        }
+    """
+
+    user = request.user
+
+    STAGE_GROUPS = {
+        "apprentice": {
+            SRSStage.APPRENTICE_1,
+            SRSStage.APPRENTICE_2,
+            SRSStage.APPRENTICE_3,
+            SRSStage.APPRENTICE_4,
+        },
+        "guru": {
+            SRSStage.GURU_1,
+            SRSStage.GURU_2,
+        },
+        "master": {SRSStage.MASTER},
+        "enlightened": {SRSStage.ENLIGHTENED},
+        "burned": {SRSStage.BURNED},
+    }
+
+    # Initialize tallies
+    results = {
+        group: {"radicals": 0, "kanji": 0, "vocab": 0}
+        for group in STAGE_GROUPS
+    }
+
+    # Query user's entries
+    entries = (
+        UserDictionaryEntry.objects
+        .filter(user=user)
+        .select_related("entry")
+        .only("srs_stage", "entry__entry_type")
+    )
+
+    # Tally per group and entry type
+    for ude in entries:
+        for group, stages in STAGE_GROUPS.items():
+            if ude.srs_stage in stages:
+                etype = ude.entry.entry_type
+                if etype == EntryType.RADICAL:
+                    results[group]["radicals"] += 1
+                elif etype == EntryType.KANJI:
+                    results[group]["kanji"] += 1
+                elif etype == EntryType.VOCAB:
+                    results[group]["vocab"] += 1
+                break
+
+    return Response(results)

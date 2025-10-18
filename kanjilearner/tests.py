@@ -823,5 +823,110 @@ class ResultSuccessRemovesRecentMistakeTest(TestCase):
         )
 
 
+class ItemSpreadAPITest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="testuser", password="pw")
+        self.client.login(username="testuser", password="pw")
+
+        # Create another user to ensure isolation
+        self.other_user = User.objects.create_user(username="otheruser", password="pw")
+
+        # Create one radical, one kanji, one vocab for this test
+        self.radical = DictionaryEntry.objects.create(
+            literal="⼈", meaning="person radical", entry_type=EntryType.RADICAL, level=1
+        )
+        self.kanji = DictionaryEntry.objects.create(
+            literal="人", meaning="person kanji", entry_type=EntryType.KANJI, level=1
+        )
+        self.vocab = DictionaryEntry.objects.create(
+            literal="人々", meaning="people vocab", entry_type=EntryType.VOCAB, level=1
+        )
+
+        # Create entries in different SRS stages for the main user
+        UserDictionaryEntry.objects.create(
+            user=self.user, entry=self.radical, srs_stage=SRSStage.APPRENTICE_2
+        )
+        UserDictionaryEntry.objects.create(
+            user=self.user, entry=self.kanji, srs_stage=SRSStage.GURU_1
+        )
+        UserDictionaryEntry.objects.create(
+            user=self.user, entry=self.vocab, srs_stage=SRSStage.BURNED
+        )
+
+        # Another user's entries shouldn't show up in results
+        UserDictionaryEntry.objects.create(
+            user=self.other_user, entry=self.radical, srs_stage=SRSStage.MASTER
+        )
+
+        self.url = reverse("item_spread")
+
+    def test_returns_expected_structure(self):
+        """Response should contain five categories with correct subkeys."""
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 200)
+
+        data = resp.json()
+        expected_categories = {"apprentice", "guru", "master", "enlightened", "burned"}
+        self.assertEqual(set(data.keys()), expected_categories)
+
+        for category in expected_categories:
+            self.assertIn("radicals", data[category])
+            self.assertIn("kanji", data[category])
+            self.assertIn("vocab", data[category])
+
+    def test_counts_match_database(self):
+        """Ensure API correctly tallies user’s entries by SRS category and type."""
+        resp = self.client.get(self.url)
+        data = resp.json()
+
+        # Our setup had:
+        # - 1 radical in apprentice
+        # - 1 kanji in guru
+        # - 1 vocab in burned
+        self.assertEqual(data["apprentice"]["radicals"], 1)
+        self.assertEqual(data["guru"]["kanji"], 1)
+        self.assertEqual(data["burned"]["vocab"], 1)
+
+        # All other counts should be zero
+        zeros = [
+            data["master"]["radicals"], data["master"]["kanji"], data["master"]["vocab"],
+            data["enlightened"]["radicals"], data["enlightened"]["kanji"], data["enlightened"]["vocab"],
+            data["apprentice"]["kanji"], data["apprentice"]["vocab"],
+            data["guru"]["radicals"], data["guru"]["vocab"],
+            data["burned"]["radicals"], data["burned"]["kanji"]
+        ]
+        self.assertTrue(all(x == 0 for x in zeros))
+
+    def test_excludes_other_users_entries(self):
+        """Ensure items from other users are not included in the tallies."""
+        resp = self.client.get(self.url)
+        data = resp.json()
+
+        # Other user's radical was MASTER — should not count
+        self.assertEqual(data["master"]["radicals"], 0)
+
+    def test_excludes_locked_and_lessons(self):
+        """Locked or lesson-stage items should not appear in tallies."""
+        locked_entry = DictionaryEntry.objects.create(
+            literal="山", meaning="mountain", entry_type=EntryType.KANJI, level=1
+        )
+        lesson_entry = DictionaryEntry.objects.create(
+            literal="火", meaning="fire", entry_type=EntryType.KANJI, level=1
+        )
+
+        UserDictionaryEntry.objects.create(
+            user=self.user, entry=locked_entry, srs_stage=SRSStage.LOCKED
+        )
+        UserDictionaryEntry.objects.create(
+            user=self.user, entry=lesson_entry, srs_stage=SRSStage.LESSON
+        )
+
+        resp = self.client.get(self.url)
+        data = resp.json()
+
+        # Locked and Lesson entries should not change the total counts
+        total_count = sum(sum(stage_counts.values()) for stage_counts in data.values())
+        # Original setup: 3 counted entries (radical, kanji, vocab)
+        self.assertEqual(total_count, 3)
 
 
